@@ -208,6 +208,46 @@ Console/
 
 ---
 
+## Why We Built It This Way (Founding Decisions)
+
+These were explicit design conversations — record them so future sessions don't re-litigate them.
+
+### Why single-agent instance instead of multi-agent?
+
+Most frameworks (CrewAI, AutoGen, LangGraph) spin up separate model instances per agent. Console deliberately doesn't. Reasons:
+
+- **Cost** — one `claude --print` call per dispatch, not N calls
+- **Shared context** — when BookWorm files a note it has full awareness of what Orchestrator decided; separate instances have to serialize that
+- **Simplicity** — no inter-agent communication protocol; the task file *is* the protocol
+- **The model already does this** — Claude contains every persona's capability; you're routing to facets of the same model
+- **Portability** — personas are `.md` files; swap in any model by changing one line
+
+Competitive landscape check (May 2026): no well-known project combines local-first + single-instance persona switching + OS-level scheduling + plain markdown portability. MemGPT/Letta is closest philosophically but not local-first and doesn't do persona routing.
+
+### Why vault-scoped agents?
+
+The user has two contexts — personal (Zoho Mail, consumer focus) and work (M365, professional tone). Each vault gets its own Herald with the right integration and voice. Vault agents override globals of the same name — clean separation without duplicating infrastructure agents (Orchestrator, Helm).
+
+### Why plain markdown, no Obsidian syntax?
+
+The user explicitly doesn't want lock-in. Notes must be readable in any editor, importable anywhere, usable with any model. `[[wikilinks]]` and callout blocks break that. YAML frontmatter + CommonMark is the universal baseline. Users can leave Console and take everything with them.
+
+### Why files as state, no database?
+
+- No setup friction on new machines
+- Git-syncable across systems
+- Human-readable and manually editable (the user edits files directly sometimes)
+- The agent team already knows how to work with files
+
+### The user's context
+
+- **Personal vault**: Zoho Mail (`chris@goudie.me`), consumer/general focus
+- **Work vault**: Microsoft 365, professional/competitive research focus
+- Console was built alongside an existing Obsidian vault (`/home/gouds/Documents/Gouds`) — they are separate systems; the Gouds vault has its own agent team (Pickles, Cipher, Hermes etc.)
+- **Development sessions**: open Claude Code from `/home/gouds/Console/` — this CLAUDE.md loads automatically and provides full context to hit the ground running
+
+---
+
 ## Note Format (BookWorm standard)
 
 ```markdown
