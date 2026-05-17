@@ -629,7 +629,7 @@ body::before {
 <div id="app">
   <!-- Topbar -->
   <div id="topbar">
-    <div class="logo">CONSOLE<span>.sys</span></div>
+    <div class="logo">CONSOLE</div>
     <nav id="nav">
       <div class="nav-tab active" data-view="tasks">Tasks <span class="badge hidden" id="pending-badge"></span></div>
       <div class="nav-tab" data-view="outbox">Outbox <span class="badge hidden" id="outbox-badge"></span></div>
@@ -815,7 +815,6 @@ body::before {
           <span class="chat-title">Agent Chat</span>
           <span class="chat-vault-tag" id="chat-vault-tag">personal</span>
           <span class="spacer"></span>
-          <button class="btn btn-ghost btn-sm" onclick="saveChatSession()">Save session</button>
         </div>
         <div id="chat-messages">
           <div id="chat-empty">
@@ -2349,6 +2348,7 @@ async function sendChatMessage() {
 
   setChatBusy(false);
   renderChatMessages();
+  saveChatSession(true);
 }
 
 async function newChat() {
