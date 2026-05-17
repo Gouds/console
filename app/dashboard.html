@@ -1138,6 +1138,7 @@ async function loadAll() {
   renderAgents();
   updateOutboxBadge();
   populateAgentDropdown();
+  if (helmIsActive()) loadHelm();
 }
 
 function updateOutboxBadge() {
@@ -2397,30 +2398,37 @@ async function rateTask(taskId, rating) {
     if (ratingRow && ratingRow.style.display !== 'none') {
       ratingRow.querySelectorAll('.star').forEach((star, idx) =>
         star.classList.toggle('filled', idx < rating));
-      const hint = ratingRow.querySelector('span[style*="click to rate"]');
-      if (hint) hint.textContent = `(${rating}/5)`;
-      const counted = ratingRow.querySelector('span[style*="color:var(--muted)"]');
-      if (counted) counted.textContent = `(${rating}/5)`;
+      const spans = ratingRow.querySelectorAll('span');
+      spans.forEach(s => { if (s.textContent.includes('click to rate')) s.textContent = `(${rating}/5)`; });
     }
-    loadAll();
+    loadAll();   // refreshes kanban + helm if helm is active
   }
 }
 
 // ── Helm ─────────────────────────────────────────────────────
 let helmData = null;
 
-async function loadHelm() {
-  const url = currentVault ? `/api/agent-stats?vault=${currentVault}` : '/api/agent-stats';
-  try {
-    const res = await fetch(url);
-    helmData = await res.json();   // returns plain array
-    renderAgentHealth(helmData);
-    updateHelmBadge(helmData);
-  } catch (_) {}
+function helmIsActive() {
+  return document.getElementById('view-helm')?.classList.contains('active');
+}
 
-  // Populate vault dropdown
+async function loadHelm() {
+  const gridEl = document.getElementById('agent-health-grid');
+  if (gridEl) gridEl.innerHTML = `<div style="color:var(--muted);font-size:13px;grid-column:1/-1;">Loading…</div>`;
+
+  const url = currentVault ? `/api/agent-stats?vault=${currentVault}` : '/api/agent-stats';
+  const res = await fetch(url);
+  if (!res.ok) {
+    if (gridEl) gridEl.innerHTML = `<div style="color:var(--danger);font-size:13px;grid-column:1/-1;">Failed to load stats (${res.status})</div>`;
+    return;
+  }
+  helmData = await res.json();
+  renderAgentHealth(helmData);
+  updateHelmBadge(helmData);
+
+  // Populate vault dropdown (only on first load — don't interrupt user mid-select)
   const vaultSel = document.getElementById('helm-create-vault');
-  if (vaultSel) {
+  if (vaultSel && vaultSel.options.length <= 1) {
     try {
       const vRes = await fetch('/api/vaults');
       const vaults = await vRes.json();
