@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Console — local-first AI agent operating system. HTTP server."""
 
+import collections
 import datetime
 import json
+import os
 import re
+import socketserver
 import subprocess
 import threading
 import time
@@ -16,7 +19,31 @@ AGENTS_DIR    = ROOT / "agents"
 VAULTS_DIR    = ROOT / "vaults"
 SETTINGS_FILE = ROOT / "settings.json"
 SCHEDULES_FILE = ROOT / "schedules.json"
+LOG_FILE      = ROOT / "console.log"
 APP_DIR       = Path(__file__).parent
+
+# ── Activity log ──────────────────────────────────────────────────────────
+
+_log_buf  = collections.deque(maxlen=500)
+_log_seq  = 0
+_log_lock = threading.Lock()
+
+def log_event(event_type, msg, level="info"):
+    global _log_seq
+    ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _log_lock:
+        _log_seq += 1
+        entry = {"seq": _log_seq, "ts": ts, "level": level, "type": event_type, "msg": msg}
+        _log_buf.append(entry)
+    try:
+        with open(LOG_FILE, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry) + "\n")
+    except Exception:
+        pass
+
+def get_log_entries(since=0):
+    with _log_lock:
+        return [e for e in _log_buf if e["seq"] > since]
 
 # ── Settings ──────────────────────────────────────────────────────────────
 
@@ -229,6 +256,7 @@ def create_task(title, request, context="", priority="Medium", assigned_to="Orch
     }
     dest = tasks_dir(vault_id) / f"{task_id}-{slugify(title)}.md"
     dest.write_text(build_task_file(fm, sections), encoding="utf-8")
+    log_event("task", f"{task_id} created: {title!r} → {assigned_to} [{vault_id or 'active'}]")
     return task_id
 
 def append_progress(task_id, entry, vault_id=None):
@@ -264,6 +292,7 @@ def set_task_status(task_id, new_status, vault_id=None):
     log = sections.get("progress_log", "").strip()
     sections["progress_log"] = f"{log}\n- **{now_ts()}** — Status → {new_status}.".strip()
     _atomic_write(f, build_task_file(fm, sections))
+    log_event("task", f"{task_id} status: {old_status!r} → {new_status!r}")
     if new_status == "done":
         resolved_vault = vault_id or load_settings().get("active_vault", "personal")
         threading.Thread(
@@ -289,6 +318,7 @@ def answer_task(task_id, answer, vault_id=None):
     fm["status"] = "in-progress"
     fm["updated"] = today()
     _atomic_write(f, build_task_file(fm, sections))
+    log_event("task", f"{task_id} answered → in-progress")
     return True
 
 # ── Agent data ────────────────────────────────────────────────────────────
@@ -491,6 +521,8 @@ EMPTY_INTEGRATIONS = {
     "calendar": {"provider": None, "address": None},
 }
 
+DEFAULT_MODEL = {"api_key": None, "model_id": "claude-sonnet-4-6"}
+
 def get_vault_config(vault_id=None):
     if vault_id is None:
         vault_id = load_settings().get("active_vault", "personal")
@@ -504,6 +536,7 @@ def get_vault_config(vault_id=None):
     for key, default in EMPTY_INTEGRATIONS.items():
         data["integrations"].setdefault(key, dict(default))
     data.setdefault("apps", [])
+    data.setdefault("model", dict(DEFAULT_MODEL))
     return data
 
 def save_vault_config(vault_id, data):
@@ -516,11 +549,14 @@ def get_vaults():
     result = []
     for v in settings.get("vaults", []):
         cfg = get_vault_config(v["id"])
-        integrations = cfg.get("integrations", {})
+        model_cfg = dict(cfg.get("model", DEFAULT_MODEL))
+        model_cfg.pop("api_key", None)  # never send the key to the frontend via vault list
         result.append({
             **v,
             "active": v["id"] == active,
-            "integrations": integrations,
+            "integrations": cfg.get("integrations", {}),
+            "model": model_cfg,
+            "has_api_key": bool(cfg.get("model", {}).get("api_key")),
         })
     return result
 
@@ -630,10 +666,15 @@ def _file_task_output(task_id, vault_id):
         f"vaults/{vault_id}/notes/[Category]/[Title].md using the standard portable "
         f"note format (YAML frontmatter + CommonMark only, no wikilinks or callouts)."
     )
+    log_event("bookworm", f"Filing {task_id} ({vault_id} vault)…")
     try:
-        run_claude(prompt, timeout=180)
-    except Exception:
-        pass
+        stdout, stderr, code = run_claude(prompt, timeout=180, vault_id=vault_id)
+        if code == 0:
+            log_event("bookworm", f"Filed {task_id} ✓")
+        else:
+            log_event("bookworm", f"Filed {task_id} — exit {code}: {(stderr or stdout)[:200]}", level="warn")
+    except Exception as e:
+        log_event("bookworm", f"Failed to file {task_id}: {e}", level="error")
 
 # ── Task watcher ──────────────────────────────────────────────────────────
 
@@ -641,11 +682,17 @@ CLAUDE_BIN = subprocess.run(
     ["which", "claude"], capture_output=True, text=True
 ).stdout.strip() or "claude"
 
-def run_claude(prompt, timeout=300):
-    """Run claude --print non-interactively from the Console root."""
+def run_claude(prompt, timeout=300, vault_id=None):
+    """Run claude --print non-interactively from the Console root.
+    If the vault has an api_key configured, it is passed as ANTHROPIC_API_KEY."""
+    env = None
+    if vault_id:
+        key = get_vault_config(vault_id).get("model", {}).get("api_key")
+        if key:
+            env = {**os.environ, "ANTHROPIC_API_KEY": key}
     result = subprocess.run(
         f'echo {json.dumps(prompt)} | {CLAUDE_BIN} --print --permission-mode bypassPermissions',
-        shell=True, cwd=str(ROOT), capture_output=True, text=True, timeout=timeout,
+        shell=True, cwd=str(ROOT), capture_output=True, text=True, timeout=timeout, env=env,
     )
     return result.stdout, result.stderr, result.returncode
 
@@ -700,13 +747,20 @@ class TaskWatcher(threading.Thread):
         if auto and counts["pending"] > 0:
             self._dispatch()
 
-    def _dispatch(self):
+    def _dispatch(self, vault_id=None):
         with self._lock:
             if self._status.get("dispatching"):
                 return  # already running
             self._status["dispatching"] = True
+        effective_vault = vault_id or load_settings().get("active_vault", "personal")
+        log_event("dispatch", f"Dispatch started [{effective_vault}]")
         try:
-            stdout, stderr, code = run_claude("/dispatch")
+            stdout, stderr, code = run_claude("/dispatch", vault_id=effective_vault)
+            first_line = (stdout or "").strip().splitlines()[0][:120] if (stdout or "").strip() else ""
+            if code == 0:
+                log_event("dispatch", f"Dispatch complete ✓{' — ' + first_line if first_line else ''}")
+            else:
+                log_event("dispatch", f"Dispatch exit {code}: {(stderr or first_line)[:200]}", level="warn")
             with self._lock:
                 self._status["last_dispatch"] = {
                     "time": now_ts(),
@@ -715,6 +769,7 @@ class TaskWatcher(threading.Thread):
                     "exit_code": code,
                 }
         except subprocess.TimeoutExpired:
+            log_event("dispatch", "Dispatch timed out", level="error")
             with self._lock:
                 self._status["last_dispatch"] = {
                     "time": now_ts(), "output": "", "error": "Dispatch timed out", "exit_code": -1
@@ -732,8 +787,8 @@ class TaskWatcher(threading.Thread):
     def force_check(self):
         self._check(load_settings())
 
-    def force_dispatch(self):
-        threading.Thread(target=self._dispatch, daemon=True).start()
+    def force_dispatch(self, vault_id=None):
+        threading.Thread(target=self._dispatch, args=(vault_id,), daemon=True).start()
 
 
 watcher = TaskWatcher()
@@ -783,13 +838,14 @@ class Scheduler(threading.Thread):
 
     def _fire(self, sched):
         vault_id = sched.get("vault", "personal")
+        log_event("schedule", f"Firing schedule: {sched.get('name')!r} ({vault_id} vault, {sched.get('schedule','daily')} @ {sched.get('time','08:00')})")
         create_task(
             sched.get("name", "Scheduled Task"),
             sched.get("prompt", ""),
             context=f"Scheduled {sched.get('schedule','daily')} at {sched.get('time','08:00')}",
             vault_id=vault_id,
         )
-        watcher.force_dispatch()
+        watcher.force_dispatch(vault_id=vault_id)
 
 
 scheduler = Scheduler()
@@ -841,6 +897,11 @@ class Handler(BaseHTTPRequestHandler):
             "/api/schedules":    lambda: load_schedules(),
             "/api/notes":        lambda: get_notes(vid),
         }
+
+        if path == "/api/log":
+            since = int(qs.get("since", [0])[0])
+            self.send_json({"entries": get_log_entries(since)})
+            return
 
         if path in simple_routes:
             self.send_json(simple_routes[path]())
@@ -925,36 +986,81 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"ok": append_progress(data["id"], data["entry"], vid)})
 
             elif p == "/api/agent-save":
-                self.send_json({"ok": save_agent_content(
-                    data["name"], data["content"],
-                    vault_id=data.get("vault") or vid,
-                    scope=data.get("scope", "vault"),
-                )})
+                scope = data.get("scope", "vault")
+                target_vault = data.get("vault") or vid
+                ok = save_agent_content(data["name"], data["content"], vault_id=target_vault, scope=scope)
+                if ok:
+                    log_event("agent", f"Saved agent {data['name']!r} ({scope}, {target_vault or 'global'})")
+                self.send_json({"ok": ok})
 
             elif p == "/api/outbox-add":
                 oid = add_outbox_entry(data["task_id"], data["agent"],
                                        data.get("type", "email"), data["to"],
                                        data["subject"], data["body"], vid)
+                log_event("outbox", f"{oid} added: {data.get('type','email')} to {data.get('to','?')} — {data.get('subject','')[:60]}")
                 self.send_json({"ok": True, "id": oid})
 
             elif p == "/api/outbox-discard":
-                self.send_json({"ok": discard_outbox_entry(data["id"], vid)})
+                ok = discard_outbox_entry(data["id"], vid)
+                if ok:
+                    log_event("outbox", f"{data['id']} discarded")
+                self.send_json({"ok": ok})
 
             elif p == "/api/vault-file-save":
-                self.send_json({"ok": save_vault_file(data["path"], data["content"], vid)})
+                ok = save_vault_file(data["path"], data["content"], vid)
+                if ok:
+                    log_event("files", f"Saved {data['path']}")
+                self.send_json({"ok": ok})
 
             elif p == "/api/settings-save":
                 data.pop("integrations", None)
                 save_settings(data)
                 watcher.force_check()  # pick up new interval immediately
+                log_event("system", "Settings saved")
                 self.send_json({"ok": True})
+
+            elif p == "/api/chat":
+                message = data.get("message", "").strip()
+                history = data.get("history", [])
+                vault_id = data.get("vault") or vid or load_settings().get("active_vault", "personal")
+                if not message:
+                    self.send_json({"ok": False, "error": "no message"}, 400)
+                    return
+                orch_content, _ = get_agent_content("Orchestrator", vault_id)
+                parts = []
+                if orch_content:
+                    parts.append(orch_content.strip())
+                    parts.append("---")
+                parts.append(
+                    f"You are in a live chat session with your user through the Console dashboard ({vault_id} vault). "
+                    "Respond conversationally and concisely. Use markdown formatting where it helps. "
+                    "You can answer questions, suggest creating a task (but wait for confirmation before doing so), "
+                    "or route to the right persona. Do not repeat the user's question back to them."
+                )
+                recent = history[-20:]  # last 10 exchanges
+                if recent:
+                    parts.append("\n## Conversation so far:")
+                    for turn in recent:
+                        label = "User" if turn["role"] == "user" else "Orchestrator"
+                        parts.append(f"{label}: {turn['content']}")
+                parts.append(f"\n## Current message:\nUser: {message}\n\nOrchestrator:")
+                prompt = "\n\n".join(parts)
+                log_event("chat", f"[{vault_id}] {message[:120]}")
+                try:
+                    stdout, stderr, code = run_claude(prompt, timeout=120, vault_id=vault_id)
+                    response = (stdout or "").strip() or "(no response)"
+                    log_event("chat", f"Response (exit {code}): {response[:100]}")
+                    self.send_json({"ok": True, "response": response})
+                except subprocess.TimeoutExpired:
+                    log_event("chat", "Chat response timed out", level="error")
+                    self.send_json({"ok": False, "error": "Timed out after 120s"})
 
             elif p == "/api/watcher-check":
                 watcher.force_check()
                 self.send_json({"ok": True, **watcher.get_status()})
 
             elif p == "/api/dispatch":
-                watcher.force_dispatch()
+                watcher.force_dispatch(vault_id=vid)
                 self.send_json({"ok": True, "msg": "Dispatch started in background"})
 
             elif p == "/api/claude":
@@ -962,8 +1068,12 @@ class Handler(BaseHTTPRequestHandler):
                 if not prompt:
                     self.send_json({"ok": False, "error": "no prompt"}, 400)
                     return
+                log_event("claude", f"Prompt: {prompt[:150]}")
                 try:
-                    stdout, stderr, code = run_claude(prompt, timeout=120)
+                    stdout, stderr, code = run_claude(prompt, timeout=120, vault_id=vid)
+                    first = (stdout or "").strip().splitlines()[0][:150] if (stdout or "").strip() else ""
+                    log_event("claude", f"Response (exit {code})" + (f": {first}" if first else ""),
+                              level="warn" if code != 0 else "info")
                     self.send_json({
                         "ok": code == 0,
                         "output": stdout,
@@ -971,11 +1081,13 @@ class Handler(BaseHTTPRequestHandler):
                         "exit_code": code,
                     })
                 except subprocess.TimeoutExpired:
+                    log_event("claude", "Prompt timed out (120s)", level="error")
                     self.send_json({"ok": False, "output": "", "error": "Timed out (120s)", "exit_code": -1})
 
             elif p == "/api/vault-config-save":
                 target_id = data.get("id") or vid or load_settings().get("active_vault")
                 save_vault_config(target_id, data)
+                log_event("system", f"Vault config saved: {target_id}")
                 self.send_json({"ok": True})
 
             elif p == "/api/vault-add":
@@ -997,12 +1109,14 @@ class Handler(BaseHTTPRequestHandler):
                     "apps": [],
                 }
                 (vault_path / "vault.json").write_text(json.dumps(vault_config, indent=2))
+                log_event("system", f"Vault created: {data['id']!r} ({data.get('name','')})")
                 self.send_json({"ok": True})
 
             elif p == "/api/vault-switch":
                 settings = load_settings()
                 settings["active_vault"] = data["id"]
                 save_settings(settings)
+                log_event("system", f"Active vault → {data['id']}")
                 self.send_json({"ok": True})
 
             elif p == "/api/schedule-save":
@@ -1013,9 +1127,16 @@ class Handler(BaseHTTPRequestHandler):
                     sched["id"] = next_schedule_id()
                 existing = next((i for i, s in enumerate(schedules) if s["id"] == sched["id"]), None)
                 if existing is not None:
+                    old = schedules[existing]
+                    time_changed = old.get("time") != sched.get("time") or old.get("schedule") != sched.get("schedule")
+                    new_time_future = datetime.datetime.now().strftime("%H:%M") < sched.get("time", "00:00")
+                    if time_changed and new_time_future:
+                        sched["last_run"] = None  # new time is still ahead today — allow it to fire
                     schedules[existing] = sched
+                    log_event("schedule", f"Updated schedule {sched['id']}: {sched.get('name','')!r} @ {sched.get('time','?')}")
                 else:
                     schedules.append(sched)
+                    log_event("schedule", f"Created schedule {sched['id']}: {sched.get('name','')!r} @ {sched.get('time','?')}")
                 sched_data["schedules"] = schedules
                 save_schedules(sched_data)
                 self.send_json({"ok": True, "id": sched["id"]})
@@ -1024,6 +1145,7 @@ class Handler(BaseHTTPRequestHandler):
                 sched_data = load_schedules()
                 sched_data["schedules"] = [s for s in sched_data.get("schedules", []) if s["id"] != data["id"]]
                 save_schedules(sched_data)
+                log_event("schedule", f"Deleted schedule {data['id']}", level="warn")
                 self.send_json({"ok": True})
 
             elif p == "/api/schedule-toggle":
@@ -1031,6 +1153,7 @@ class Handler(BaseHTTPRequestHandler):
                 for s in sched_data.get("schedules", []):
                     if s["id"] == data["id"]:
                         s["enabled"] = not s.get("enabled", True)
+                        log_event("schedule", f"Schedule {data['id']} {'enabled' if s['enabled'] else 'disabled'}")
                         break
                 save_schedules(sched_data)
                 self.send_json({"ok": True})
@@ -1049,11 +1172,15 @@ class Handler(BaseHTTPRequestHandler):
                 if not cmd:
                     self.send_json({"stdout": "", "stderr": "", "exit_code": 0, "cwd": str(ROOT)})
                     return
+                log_event("terminal", f"$ {cmd[:200]}")
                 try:
                     result = subprocess.run(
                         cmd, shell=True, cwd=str(ROOT),
                         capture_output=True, text=True, timeout=30
                     )
+                    out = (result.stdout or result.stderr or "").strip()
+                    log_event("terminal", f"exit {result.returncode}" + (f": {out[:300]}" if out else ""),
+                              level="error" if result.returncode != 0 else "info")
                     self.send_json({
                         "stdout": result.stdout,
                         "stderr": result.stderr,
@@ -1061,7 +1188,13 @@ class Handler(BaseHTTPRequestHandler):
                         "cwd": str(ROOT),
                     })
                 except subprocess.TimeoutExpired:
+                    log_event("terminal", f"Command timed out: {cmd[:80]}", level="error")
                     self.send_json({"stdout": "", "stderr": "Command timed out (30s limit)", "exit_code": 124, "cwd": str(ROOT)})
+
+            elif p == "/api/log-clear":
+                with _log_lock:
+                    _log_buf.clear()
+                self.send_json({"ok": True})
 
             else:
                 self.send_response(404)
@@ -1073,8 +1206,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"ok": False, "error": str(e)}, 500)
 
 
-class _ReuseServer(HTTPServer):
+class _ReuseServer(socketserver.ThreadingMixIn, HTTPServer):
     allow_reuse_address = True
+    daemon_threads = True  # don't block shutdown on in-flight requests
 
     def server_bind(self):
         import socket as _socket
@@ -1085,8 +1219,10 @@ class _ReuseServer(HTTPServer):
 if __name__ == "__main__":
     port = get_port()
     server = _ReuseServer(("localhost", port), Handler)
+    log_event("system", f"Console started on port {port}")
     print(f"Console → http://localhost:{port}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
+        log_event("system", "Console stopped")
         print("\nStopped.")

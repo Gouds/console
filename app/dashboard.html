@@ -327,6 +327,40 @@ body::before {
 #sched-form-wrap.open { display: block; }
 #sched-form-wrap h3 { font-size: 13px; font-weight: 600; margin-bottom: 14px; }
 
+/* ── Log tab ──────────────────────────────────────────────── */
+#log-stream {
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+  height: calc(100vh - 180px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.log-entry { display: flex; gap: 10px; padding: 2px 4px; border-radius: 3px; line-height: 1.5; }
+.log-entry:hover { background: var(--surface); }
+.log-ts { color: var(--muted); white-space: nowrap; flex-shrink: 0; }
+.log-type { width: 68px; flex-shrink: 0; font-weight: 600; text-align: right; }
+.log-msg { flex: 1; word-break: break-word; }
+.log-type.task     { color: #4a9eff; }
+.log-type.dispatch { color: #a78bfa; }
+.log-type.schedule { color: #34d399; }
+.log-type.terminal { color: #f59e0b; }
+.log-type.claude   { color: #f472b6; }
+.log-type.bookworm { color: #60a5fa; }
+.log-type.chat     { color: #34d399; }
+.log-type.agent    { color: #fb923c; }
+.log-type.files    { color: #94a3b8; }
+.log-type.outbox   { color: #e879f9; }
+.log-type.system   { color: var(--muted); }
+.log-entry.warn .log-msg  { color: #f59e0b; }
+.log-entry.error .log-msg { color: #f87171; }
+.log-empty { color: var(--muted); text-align: center; padding: 60px 0; font-size: 13px; }
+
 /* ── Notes tab ────────────────────────────────────────────── */
 #view-notes.active { display: flex; gap: 0; margin: -28px; height: calc(100vh - 48px); }
 #notes-sidebar {
@@ -401,43 +435,74 @@ body::before {
 .term-quick-btn:hover { border-color: var(--accent); color: var(--accent); }
 
 /* ── Chat (coming soon) ───────────────────────────────────── */
-#chat-coming-soon {
+/* ── Chat tab ─────────────────────────────────────────────── */
+#chat-header {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 20px; border-bottom: 1px solid var(--border);
+  background: var(--surface); flex-shrink: 0;
+}
+#chat-header .chat-title { font-size: 13px; font-weight: 600; }
+#chat-header .chat-vault-tag {
+  font-size: 10px; font-family: var(--mono); color: var(--muted);
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 10px; padding: 2px 8px;
+}
+#chat-header .spacer { flex: 1; }
+#chat-messages {
+  flex: 1; overflow-y: auto; padding: 24px 20px;
+  display: flex; flex-direction: column; gap: 16px;
+  background: var(--bg);
+}
+.chat-msg { display: flex; flex-direction: column; max-width: 72%; gap: 4px; }
+.chat-msg.user { align-self: flex-end; align-items: flex-end; }
+.chat-msg.agent { align-self: flex-start; align-items: flex-start; }
+.chat-meta { font-size: 10px; color: var(--muted); padding: 0 4px; }
+.chat-bubble {
+  padding: 10px 14px; border-radius: 12px;
+  font-size: 13px; line-height: 1.55; word-break: break-word;
+}
+.chat-msg.user  .chat-bubble { background: var(--accent); color: #000; border-bottom-right-radius: 3px; }
+.chat-msg.agent .chat-bubble { background: var(--surface); border: 1px solid var(--border); border-bottom-left-radius: 3px; }
+.chat-bubble p { margin: 0 0 8px; }
+.chat-bubble p:last-child { margin-bottom: 0; }
+.chat-bubble h1,.chat-bubble h2,.chat-bubble h3 { margin: 8px 0 4px; font-size: 13px; }
+.chat-bubble code { background: rgba(255,255,255,.08); padding: 1px 5px; border-radius: 3px; font-size: 11px; }
+.chat-bubble ul { margin: 4px 0; padding-left: 18px; }
+.chat-bubble li { margin-bottom: 2px; }
+.chat-bubble strong { font-weight: 700; }
+.chat-msg.user .chat-bubble code { background: rgba(0,0,0,.15); }
+.chat-typing { align-self: flex-start; display: none; }
+.chat-typing.visible { display: flex; }
+.chat-typing .chat-bubble { display: flex; gap: 4px; align-items: center; padding: 12px 16px; }
+.typing-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: typingPulse 1.2s infinite; }
+.typing-dot:nth-child(2) { animation-delay: .2s; }
+.typing-dot:nth-child(3) { animation-delay: .4s; }
+@keyframes typingPulse { 0%,60%,100% { opacity:.3; transform:scale(1); } 30% { opacity:1; transform:scale(1.2); } }
+#chat-empty {
   flex: 1; display: flex; flex-direction: column;
-  align-items: center; justify-content: center; gap: 20px;
-  background: #080807;
+  align-items: center; justify-content: center; gap: 10px;
+  color: var(--muted); font-size: 13px; text-align: center; padding: 40px;
 }
-.cs-badge {
-  font-family: var(--mono); font-size: 10px; font-weight: 700;
-  letter-spacing: 3px; color: var(--muted);
-  border: 1px solid var(--border); border-radius: 20px;
-  padding: 4px 14px; text-transform: uppercase;
+#chat-empty .ce-label { font-size: 22px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+#chat-empty .ce-sub { max-width: 360px; line-height: 1.6; }
+#chat-footer {
+  display: flex; align-items: flex-end; gap: 10px;
+  padding: 12px 20px; border-top: 1px solid var(--border);
+  background: var(--surface); flex-shrink: 0;
 }
-.cs-icon { font-size: 48px; opacity: .25; }
-.cs-title { font-size: 22px; font-weight: 700; color: var(--text); }
-.cs-sub   { font-size: 13px; color: var(--muted); text-align: center; max-width: 400px; line-height: 1.6; }
-.cs-features {
-  display: flex; gap: 12px; flex-wrap: wrap; justify-content: center;
-  margin-top: 8px;
+#chat-input {
+  flex: 1; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px 14px; color: var(--text);
+  font-family: var(--sans); font-size: 13px; line-height: 1.4;
+  resize: none; min-height: 42px; max-height: 160px; outline: none;
 }
-.cs-feature {
-  background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
-  padding: 10px 16px; font-size: 12px; color: var(--muted); text-align: center;
+#chat-input:focus { border-color: var(--accent); }
+#chat-send-btn {
+  background: var(--accent); color: #000; border: none; border-radius: 8px;
+  padding: 10px 18px; font-size: 13px; font-weight: 700;
+  cursor: pointer; flex-shrink: 0; height: 42px;
 }
-.cs-feature strong { display: block; color: var(--text); margin-bottom: 2px; font-size: 13px; }
-#chat-input-placeholder {
-  display: flex; align-items: center; gap: 10px;
-  width: 100%; max-width: 560px;
-  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
-  padding: 12px 16px; opacity: .4; pointer-events: none;
-}
-#chat-input-placeholder input {
-  flex: 1; background: transparent; border: none; outline: none;
-  color: var(--muted); font-family: var(--sans); font-size: 13px;
-}
-#chat-input-placeholder .send-btn {
-  background: var(--accent); color: #000; border: none; border-radius: 4px;
-  padding: 6px 14px; font-size: 12px; font-weight: 700; cursor: not-allowed;
-}
+#chat-send-btn:disabled { opacity: .4; cursor: not-allowed; }
 .vault-card {
   background: var(--bg); border: 1px solid var(--border);
   border-radius: 6px; margin-bottom: 12px; overflow: hidden;
@@ -492,6 +557,7 @@ body::before {
       <div class="nav-tab" data-view="terminal">Terminal</div>
       <div class="nav-tab" data-view="schedules">Schedules</div>
       <div class="nav-tab" data-view="notes">Notes</div>
+      <div class="nav-tab" data-view="log">Log <span class="badge hidden" id="log-badge"></span></div>
       <div class="nav-tab" data-view="chat">Chat</div>
       <div class="nav-tab" data-view="settings">Settings</div>
     </nav>
@@ -635,24 +701,43 @@ body::before {
       </div>
     </div>
 
+    <!-- ── Log view ── -->
+    <div id="view-log" class="view">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+        <div>
+          <div style="font-size:18px; font-weight:700;">Activity Log</div>
+          <div style="font-size:11px; color:var(--muted); margin-top:2px;">Live stream of tasks, dispatch, schedules, terminal, and Claude calls</div>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <span id="log-live-dot" style="width:8px;height:8px;border-radius:50%;background:var(--muted);display:inline-block;" title="Polling paused"></span>
+          <button class="btn btn-ghost btn-sm" onclick="copyLog()">Copy</button>
+          <button class="btn btn-ghost btn-sm" onclick="clearLog()">Clear</button>
+        </div>
+      </div>
+      <div id="log-stream"></div>
+    </div>
+
     <!-- ── Chat view ── -->
     <div id="view-chat" class="view">
-      <div id="chat-coming-soon">
-        <div class="cs-badge">Coming Soon</div>
-        <div class="cs-icon">💬</div>
-        <div class="cs-title">Agent Chat</div>
-        <div class="cs-sub">Talk directly to your agent team. The Orchestrator routes your message, adopts the right agent persona, and responds inline — all without leaving the dashboard.</div>
-        <div class="cs-features">
-          <div class="cs-feature"><strong>Task creation</strong>Ask an agent to queue a task</div>
-          <div class="cs-feature"><strong>Live research</strong>Scout answers inline</div>
-          <div class="cs-feature"><strong>Draft review</strong>Herald reads and revises</div>
-          <div class="cs-feature"><strong>Dispatch trigger</strong>Run the queue by asking</div>
+      <div id="chat-header">
+        <span class="chat-title">Agent Chat</span>
+        <span class="chat-vault-tag" id="chat-vault-tag">personal</span>
+        <span class="spacer"></span>
+        <button class="btn btn-ghost btn-sm" onclick="saveChatSession()">Save session</button>
+        <button class="btn btn-ghost btn-sm" onclick="newChat()">New chat</button>
+      </div>
+      <div id="chat-messages">
+        <div id="chat-empty">
+          <div class="ce-label">Agent Chat</div>
+          <div class="ce-sub">Talk directly to your agent team. The Orchestrator routes your message and responds as the right persona.</div>
         </div>
-        <div id="chat-input-placeholder">
-          <input type="text" placeholder="Ask your agent team anything…" disabled>
-          <button class="send-btn">Send</button>
+        <div class="chat-typing" id="chat-typing">
+          <div class="chat-bubble"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></div>
         </div>
-        <div style="font-size:11px;color:var(--muted);margin-top:4px;">Requires an Anthropic API key — configure it in Settings when ready.</div>
+      </div>
+      <div id="chat-footer">
+        <textarea id="chat-input" rows="1" placeholder="Ask your agent team anything…"></textarea>
+        <button id="chat-send-btn" onclick="sendChatMessage()">Send</button>
       </div>
     </div>
 
@@ -667,7 +752,8 @@ body::before {
       </div>
 
       <div id="sched-form-wrap">
-        <h3>New Schedule</h3>
+        <h3 id="sched-form-title">New Schedule</h3>
+        <input type="hidden" id="sf-id">
         <div class="form-row">
           <div class="form-group">
             <label>Name</label>
@@ -885,6 +971,8 @@ document.querySelectorAll('.nav-tab').forEach(tab => {
     if (view === 'settings') loadSettings();
     if (view === 'schedules') loadSchedules();
     if (view === 'notes') loadNotes();
+    if (view === 'log') startLogPolling(); else stopLogPolling();
+    if (view === 'chat') initChat();
   });
 });
 
@@ -1379,14 +1467,25 @@ async function loadSettings() {
 const EMAIL_PROVIDERS = ['zoho','m365','gmail','icloud','fastmail','other'];
 const PROVIDER_LABELS  = {zoho:'Zoho Mail', m365:'Microsoft 365', gmail:'Gmail', icloud:'iCloud', fastmail:'Fastmail', other:'Other'};
 
+const MODEL_OPTIONS = [
+  {id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6 (default)'},
+  {id: 'claude-opus-4-7',   label: 'Claude Opus 4.7'},
+  {id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5'},
+];
+
 function renderVaultList(vaults) {
   document.getElementById('vault-list').innerHTML = vaults.map(v => {
     const active    = v.active;
-    const emailCfg  = v.integrations?.email  || {};
-    const calCfg    = v.integrations?.calendar || {};
+    const emailCfg  = v.integrations?.email || {};
     const emailSet  = emailCfg.provider;
+    const modelCfg  = v.model || {};
+    const modelId   = modelCfg.model_id || 'claude-sonnet-4-6';
+    const hasKey    = v.has_api_key;
     const provOpts  = EMAIL_PROVIDERS.map(p =>
       `<option value="${p}" ${emailCfg.provider === p ? 'selected' : ''}>${PROVIDER_LABELS[p]||p}</option>`
+    ).join('');
+    const modelOpts = MODEL_OPTIONS.map(m =>
+      `<option value="${m.id}" ${modelId === m.id ? 'selected' : ''}>${m.label}</option>`
     ).join('');
 
     return `
@@ -1398,12 +1497,25 @@ function renderVaultList(vaults) {
         </div>
         <div class="vault-row-actions">
           ${emailSet ? `<span class="integration-pill configured">✉️ ${PROVIDER_LABELS[emailSet]||emailSet}</span>` : `<span class="integration-pill">✉️ No email</span>`}
+          ${hasKey   ? `<span class="integration-pill configured">🔑 API key set</span>` : `<span class="integration-pill">🔑 No API key</span>`}
           ${!active ? `<button class="btn btn-ghost btn-sm" onclick="switchVault('${v.id}')">Switch</button>` : '<span style="font-size:11px;color:var(--done);font-weight:600;">● Active</span>'}
           <button class="btn btn-ghost btn-sm" onclick="toggleVaultIntegrations('${v.id}')">Configure</button>
         </div>
       </div>
       <div class="vault-integrations" id="vault-int-${v.id}">
-        <h4>Integrations</h4>
+        <h4>Model</h4>
+        <div class="integration-row">
+          <span class="integration-label">Model</span>
+          <select class="provider-select" id="vi-model-id-${v.id}">${modelOpts}</select>
+        </div>
+        <div class="integration-row">
+          <span class="integration-label">API Key</span>
+          <input class="integration-address" type="password" id="vi-api-key-${v.id}"
+            placeholder="${hasKey ? '••••••••  (leave blank to keep existing)' : 'sk-ant-api03-…'}"
+            autocomplete="off">
+          <button class="btn btn-ghost btn-sm" onclick="toggleKeyVisibility('vi-api-key-${v.id}', this)" style="flex-shrink:0;">Show</button>
+        </div>
+        <h4 style="margin-top:14px;">Integrations</h4>
         <div class="integration-row">
           <span class="integration-label">Email</span>
           <select class="provider-select" id="vi-email-provider-${v.id}">
@@ -1417,15 +1529,7 @@ function renderVaultList(vaults) {
           <span class="integration-label">Calendar</span>
           <span class="integration-pill coming-soon">📅 Coming soon</span>
         </div>
-        <div class="integration-row">
-          <span class="integration-label">Tasks</span>
-          <span class="integration-pill coming-soon">✅ Coming soon</span>
-        </div>
-        <div class="integration-row">
-          <span class="integration-label">Chat</span>
-          <span class="integration-pill coming-soon">💬 Coming soon</span>
-        </div>
-        <div style="margin-top:12px;">
+        <div style="margin-top:14px;">
           <button class="btn btn-primary btn-sm" onclick="saveVaultIntegrations('${v.id}')">Save</button>
           <span id="vi-saved-${v.id}" style="display:none;margin-left:10px;font-size:11px;color:var(--done);">Saved ✓</span>
         </div>
@@ -1438,23 +1542,42 @@ function toggleVaultIntegrations(id) {
   document.getElementById(`vault-int-${id}`).classList.toggle('open');
 }
 
+function toggleKeyVisibility(inputId, btn) {
+  const el = document.getElementById(inputId);
+  if (!el) return;
+  if (el.type === 'password') { el.type = 'text'; btn.textContent = 'Hide'; }
+  else                        { el.type = 'password'; btn.textContent = 'Show'; }
+}
+
 async function saveVaultIntegrations(id) {
+  // Load current config so we can preserve api_key if field left blank
+  const cfgRes = await fetch(`/api/vault-config?vault=${id}`);
+  const current = await cfgRes.json();
+
   const provider = document.getElementById(`vi-email-provider-${id}`).value || null;
   const address  = document.getElementById(`vi-email-address-${id}`).value.trim() || null;
+  const modelId  = document.getElementById(`vi-model-id-${id}`).value;
+  const newKey   = document.getElementById(`vi-api-key-${id}`).value.trim();
+
+  const model = {
+    model_id: modelId,
+    api_key:  newKey || current.model?.api_key || null,
+  };
+
   const res = await fetch(`/api/vault-config-save?vault=${id}`, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({
+      ...current,
       id,
-      integrations: {
-        email:    {provider, address},
-        calendar: {provider: null, address: null},
-      },
-      apps: [],
+      integrations: { email: {provider, address}, calendar: {provider: null, address: null} },
+      model,
+      apps: current.apps || [],
     }),
   });
   const data = await res.json();
   if (data.ok) {
+    document.getElementById(`vi-api-key-${id}`).value = '';
     const saved = document.getElementById(`vi-saved-${id}`);
     saved.style.display = 'inline';
     setTimeout(() => { saved.style.display = 'none'; }, 2500);
@@ -1804,6 +1927,7 @@ function renderSchedules() {
       </div>
       <div class="sched-actions">
         <button class="btn btn-ghost btn-sm" onclick="runScheduleNow('${s.id}')" title="Run now">&#9654; Run now</button>
+        <button class="btn btn-ghost btn-sm" onclick="openEditSchedule('${s.id}')">Edit</button>
         <button class="btn btn-danger btn-sm" onclick="deleteSchedule('${s.id}')">Delete</button>
       </div>
     </div>`;
@@ -1811,31 +1935,59 @@ function renderSchedules() {
 }
 
 function toggleSchedForm() {
-  document.getElementById('sched-form-wrap').classList.toggle('open');
+  const wrap = document.getElementById('sched-form-wrap');
+  const isOpen = wrap.classList.contains('open');
+  if (!isOpen) {
+    // Reset to New mode when opening via the button
+    document.getElementById('sf-id').value = '';
+    document.getElementById('sf-name').value = '';
+    document.getElementById('sf-prompt').value = '';
+    document.getElementById('sf-freq').value = 'daily';
+    document.getElementById('sf-time').value = '08:00';
+    document.getElementById('sched-form-title').textContent = 'New Schedule';
+  }
+  wrap.classList.toggle('open');
+}
+
+function openEditSchedule(id) {
+  const s = schedulesData.find(x => x.id === id);
+  if (!s) return;
+  document.getElementById('sf-id').value = s.id;
+  document.getElementById('sf-name').value = s.name || '';
+  document.getElementById('sf-prompt').value = s.prompt || '';
+  document.getElementById('sf-freq').value = s.schedule || 'daily';
+  document.getElementById('sf-time').value = s.time || '08:00';
+  if (document.getElementById('sf-vault')) document.getElementById('sf-vault').value = s.vault || 'personal';
+  document.getElementById('sched-form-title').textContent = 'Edit Schedule';
+  document.getElementById('sched-form-wrap').classList.add('open');
+  document.getElementById('sched-form-wrap').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 async function saveSchedule() {
   const name   = document.getElementById('sf-name').value.trim();
   const prompt = document.getElementById('sf-prompt').value.trim();
   if (!name || !prompt) { alert('Name and Prompt are required.'); return; }
+  const existingId = document.getElementById('sf-id').value;
+  const existing = existingId ? schedulesData.find(x => x.id === existingId) : null;
   const sched = {
+    ...(existing || {}),
     name,
     prompt,
     schedule: document.getElementById('sf-freq').value,
     time:     document.getElementById('sf-time').value || '08:00',
     vault:    document.getElementById('sf-vault').value || 'personal',
-    enabled:  true,
-    last_run: null,
   };
+  if (!existingId) {
+    sched.enabled = true;
+    sched.last_run = null;
+  }
   const res = await fetch('/api/schedule-save', {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify(sched)
   });
   const data = await res.json();
   if (data.ok) {
-    document.getElementById('sf-name').value = '';
-    document.getElementById('sf-prompt').value = '';
-    toggleSchedForm();
+    document.getElementById('sched-form-wrap').classList.remove('open');
     loadSchedules();
   }
 }
@@ -1866,6 +2018,216 @@ async function runScheduleNow(id) {
   });
   btn.textContent = 'Queued ✓';
   setTimeout(() => { btn.disabled = false; btn.textContent = '▶ Run now'; loadSchedules(); }, 2000);
+}
+
+// ── Chat ─────────────────────────────────────────────────────
+let chatHistory = [];
+let chatBusy = false;
+
+function initChat() {
+  const tag = document.getElementById('chat-vault-tag');
+  if (tag) tag.textContent = currentVault || 'personal';
+}
+
+function chatTimestamp() {
+  return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function renderChatMessages() {
+  const area = document.getElementById('chat-messages');
+  const empty = document.getElementById('chat-empty');
+  const typing = document.getElementById('chat-typing');
+  if (!area) return;
+
+  // Remove all message nodes (leave empty + typing in place)
+  area.querySelectorAll('.chat-msg').forEach(el => el.remove());
+
+  if (chatHistory.length === 0) {
+    empty.style.display = 'flex';
+  } else {
+    empty.style.display = 'none';
+    const frag = document.createDocumentFragment();
+    chatHistory.forEach(turn => {
+      const div = document.createElement('div');
+      div.className = `chat-msg ${turn.role === 'user' ? 'user' : 'agent'}`;
+      const meta = turn.role === 'user' ? `You · ${turn.ts}` : `Orchestrator · ${turn.ts}`;
+      const bubbleContent = turn.role === 'user'
+        ? escHtml(turn.content)
+        : renderMarkdown(turn.content);
+      div.innerHTML = `<div class="chat-meta">${meta}</div><div class="chat-bubble">${bubbleContent}</div>`;
+      frag.appendChild(div);
+    });
+    // Insert before typing indicator
+    area.insertBefore(frag, typing);
+  }
+
+  // Scroll to bottom
+  area.scrollTop = area.scrollHeight;
+}
+
+function setChatBusy(busy) {
+  chatBusy = busy;
+  const btn = document.getElementById('chat-send-btn');
+  const input = document.getElementById('chat-input');
+  const typing = document.getElementById('chat-typing');
+  if (btn) btn.disabled = busy;
+  if (input) input.disabled = busy;
+  if (typing) typing.classList.toggle('visible', busy);
+  // Keep typing indicator at bottom
+  if (busy) document.getElementById('chat-messages').scrollTop = 99999;
+}
+
+async function sendChatMessage() {
+  if (chatBusy) return;
+  const input = document.getElementById('chat-input');
+  const message = input.value.trim();
+  if (!message) return;
+
+  input.value = '';
+  input.style.height = 'auto';
+
+  chatHistory.push({ role: 'user', content: message, ts: chatTimestamp() });
+  renderChatMessages();
+  setChatBusy(true);
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, history: chatHistory.slice(0, -1), vault: currentVault }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      chatHistory.push({ role: 'assistant', content: data.response, ts: chatTimestamp() });
+    } else {
+      chatHistory.push({ role: 'assistant', content: `Error: ${data.error || 'unknown'}`, ts: chatTimestamp() });
+    }
+  } catch (e) {
+    chatHistory.push({ role: 'assistant', content: 'Network error — could not reach server.', ts: chatTimestamp() });
+  }
+
+  setChatBusy(false);
+  renderChatMessages();
+}
+
+function newChat() {
+  chatHistory = [];
+  renderChatMessages();
+  document.getElementById('chat-input')?.focus();
+}
+
+async function saveChatSession() {
+  if (!chatHistory.length) return;
+  const date = new Date();
+  const dateStr = date.toISOString().slice(0, 10);
+  const timeStr = date.toTimeString().slice(0, 5).replace(':', '-');
+  const path = `sessions/${dateStr} ${timeStr} - Chat.md`;
+  const lines = [`---\ndate: ${dateStr}\ntype: chat\ntags: [chat]\n---\n\n# Chat ${dateStr} ${timeStr}\n`];
+  chatHistory.forEach(t => {
+    const label = t.role === 'user' ? '**You**' : '**Orchestrator**';
+    lines.push(`${label} · ${t.ts}\n\n${t.content}\n`);
+  });
+  const content = lines.join('\n---\n\n');
+  await fetch('/api/vault-file-save', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path, content, vault: currentVault }),
+  });
+  // Brief visual feedback on the button
+  const btn = event.target;
+  const orig = btn.textContent;
+  btn.textContent = 'Saved ✓';
+  setTimeout(() => { btn.textContent = orig; }, 2000);
+}
+
+// Auto-resize textarea + Enter to send (Shift+Enter for newline)
+document.addEventListener('DOMContentLoaded', () => {
+  const input = document.getElementById('chat-input');
+  if (!input) return;
+  input.addEventListener('input', () => {
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight, 160) + 'px';
+  });
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendChatMessage();
+    }
+  });
+});
+
+// ── Activity Log ─────────────────────────────────────────────
+let _logSeq = 0;
+let _logTimer = null;
+let _logEntries = [];
+let _logFetching = false;
+
+async function fetchLog() {
+  if (_logFetching) return;
+  _logFetching = true;
+  try {
+    const res = await fetch(`/api/log?since=${_logSeq}`);
+    const data = await res.json();
+    if (data.entries && data.entries.length) {
+      _logEntries = _logEntries.concat(data.entries);
+      if (_logEntries.length > 500) _logEntries = _logEntries.slice(-500);
+      _logSeq = data.entries[data.entries.length - 1].seq;
+      renderLog();
+      updateLogBadge(data.entries.length);
+    }
+  } catch (_) {} finally {
+    _logFetching = false;
+  }
+}
+
+function renderLog() {
+  const el = document.getElementById('log-stream');
+  if (!el) return;
+  if (!_logEntries.length) {
+    el.innerHTML = '<div class="log-empty">No activity yet — actions will appear here as they happen.</div>';
+    return;
+  }
+  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+  el.innerHTML = _logEntries.map(e => `
+    <div class="log-entry ${e.level || 'info'}">
+      <span class="log-ts">${e.ts.slice(11)}</span>
+      <span class="log-type ${e.type}">${e.type}</span>
+      <span class="log-msg">${escHtml(e.msg)}</span>
+    </div>`).join('');
+  if (atBottom) el.scrollTop = el.scrollHeight;
+}
+
+function startLogPolling() {
+  fetchLog();
+  const dot = document.getElementById('log-live-dot');
+  if (dot) { dot.style.background = '#34d399'; dot.title = 'Live'; }
+  document.getElementById('log-badge')?.classList.add('hidden');
+  if (!_logTimer) _logTimer = setInterval(fetchLog, 2000);
+}
+
+function stopLogPolling() {
+  if (_logTimer) { clearInterval(_logTimer); _logTimer = null; }
+  const dot = document.getElementById('log-live-dot');
+  if (dot) { dot.style.background = 'var(--muted)'; dot.title = 'Polling paused'; }
+}
+
+function updateLogBadge(count) {
+  const badge = document.getElementById('log-badge');
+  if (!badge) return;
+  const logActive = document.getElementById('view-log')?.classList.contains('active');
+  if (!logActive && count > 0) badge.classList.remove('hidden');
+}
+
+async function clearLog() {
+  await fetch('/api/log-clear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  _logEntries = [];
+  _logSeq = 0;
+  renderLog();
+}
+
+function copyLog() {
+  const text = _logEntries.map(e => `${e.ts} [${e.type}] ${e.msg}`).join('\n');
+  navigator.clipboard.writeText(text).catch(() => {});
 }
 
 // ── Notes ────────────────────────────────────────────────────
