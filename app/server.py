@@ -136,6 +136,8 @@ def build_task_file(fm, sections):
     if fm.get("status") == "waiting-input" or sections.get("waiting_for_input"):
         wfi = sections.get("waiting_for_input") or ""
         waiting_section = f"\n---\n\n## Waiting For Input\n\n{wfi}\n"
+    qa_score_line    = f"\nqa_score: {fm['qa_score']}"       if fm.get("qa_score")    else ""
+    user_rating_line = f"\nuser_rating: {fm['user_rating']}" if fm.get("user_rating") else ""
     return f"""---
 id: {fm.get('id', '')}
 title: {fm.get('title', '')}
@@ -143,7 +145,7 @@ status: {fm.get('status', 'pending')}
 assigned_to: {fm.get('assigned_to', 'Orchestrator')}
 priority: {fm.get('priority', 'Medium')}
 created: {fm.get('created', today())}
-updated: {fm.get('updated', today())}
+updated: {fm.get('updated', today())}{qa_score_line}{user_rating_line}
 type: task
 ---
 
@@ -233,6 +235,8 @@ def get_tasks(vault_id=None):
             "file":           f.name,
             "waiting_question": _extract_question(sections.get("waiting_for_input", "")),
             "output_preview": _output_preview(sections.get("output", "")),
+            "qa_score":       fm.get("qa_score"),
+            "user_rating":    fm.get("user_rating"),
         })
     return result
 
@@ -295,9 +299,8 @@ def set_task_status(task_id, new_status, vault_id=None):
     log_event("task", f"{task_id} status: {old_status!r} → {new_status!r}")
     if new_status == "done":
         resolved_vault = vault_id or load_settings().get("active_vault", "personal")
-        threading.Thread(
-            target=_file_task_output, args=(task_id, resolved_vault), daemon=True
-        ).start()
+        threading.Thread(target=_file_task_output, args=(task_id, resolved_vault), daemon=True).start()
+        threading.Thread(target=_qa_task_output,   args=(task_id, resolved_vault), daemon=True).start()
     return True, "ok"
 
 def answer_task(task_id, answer, vault_id=None):
@@ -320,6 +323,108 @@ def answer_task(task_id, answer, vault_id=None):
     _atomic_write(f, build_task_file(fm, sections))
     log_event("task", f"{task_id} answered → in-progress")
     return True
+
+def rate_task(task_id, rating, vault_id=None):
+    f = find_task_file(task_id, vault_id)
+    if not f:
+        return False
+    rating = max(1, min(5, int(rating)))
+    text = f.read_text(encoding="utf-8")
+    fm, sections = parse_task_file(text)
+    fm["user_rating"] = rating
+    fm["updated"] = today()
+    log = sections.get("progress_log", "").strip()
+    stars = "★" * rating + "☆" * (5 - rating)
+    sections["progress_log"] = f"{log}\n- **{now_ts()}** — User rating: {stars} ({rating}/5).".strip()
+    _atomic_write(f, build_task_file(fm, sections))
+    log_event("task", f"{task_id} rated {rating}/5")
+    return True
+
+def _qa_task_output(task_id, vault_id):
+    """Background: run a QA evaluation on a completed task output."""
+    f = find_task_file(task_id, vault_id)
+    if not f:
+        return
+    text = f.read_text(encoding="utf-8")
+    fm, sections = parse_task_file(text)
+    request = sections.get("request", "").strip()[:500]
+    output  = sections.get("output",  "").strip()[:1500]
+    agent   = fm.get("assigned_to", "Orchestrator")
+    if not output or output in ("*Pending.*", "*In progress.*"):
+        return
+    prompt = (
+        f"You are a QA reviewer for an AI agent operating system.\n\n"
+        f"Task: {fm.get('title','')}\nAssigned agent: {agent}\n\n"
+        f"Original request:\n{request}\n\nAgent output:\n{output}\n\n"
+        f"Rate the output 1-5 and give a one-sentence summary.\n"
+        f"1=Failed 2=Poor 3=Adequate 4=Good 5=Excellent\n\n"
+        f"Respond in this exact format (nothing else):\n"
+        f"SCORE: [number]\nSUMMARY: [one sentence]"
+    )
+    log_event("qa", f"QA evaluating {task_id} ({agent})")
+    try:
+        stdout, _, code = run_claude(prompt, timeout=60, vault_id=vault_id)
+        score_m   = re.search(r"SCORE:\s*([1-5])", stdout or "")
+        summary_m = re.search(r"SUMMARY:\s*(.+)", stdout or "")
+        if score_m:
+            score = int(score_m.group(1))
+            summary = summary_m.group(1).strip() if summary_m else ""
+            # Re-read file in case it changed (BookWorm may have run too)
+            text2 = f.read_text(encoding="utf-8")
+            fm2, sections2 = parse_task_file(text2)
+            fm2["qa_score"] = score
+            fm2["updated"]  = today()
+            log2 = sections2.get("progress_log", "").strip()
+            stars = "★" * score + "☆" * (5 - score)
+            sections2["progress_log"] = f"{log2}\n- **{now_ts()}** — QA: {stars} ({score}/5) — {summary}".strip()
+            _atomic_write(f, build_task_file(fm2, sections2))
+            log_event("qa", f"{task_id} scored {score}/5: {summary[:80]}")
+        else:
+            log_event("qa", f"{task_id} QA parse failed", level="warn")
+    except Exception as e:
+        log_event("qa", f"{task_id} QA error: {e}", level="error")
+
+def get_agent_stats(vault_id=None):
+    """Aggregate qa_score and user_rating per agent across completed tasks."""
+    tasks = get_tasks(vault_id)
+    stats = {}
+    for task in tasks:
+        if task.get("status") != "done":
+            continue
+        agent = task.get("assigned_to") or "Orchestrator"
+        if agent not in stats:
+            stats[agent] = {"task_count": 0, "qa_scores": [], "user_ratings": []}
+        stats[agent]["task_count"] += 1
+        try:
+            if task.get("qa_score"):
+                stats[agent]["qa_scores"].append(float(task["qa_score"]))
+        except (ValueError, TypeError):
+            pass
+        try:
+            if task.get("user_rating"):
+                stats[agent]["user_ratings"].append(float(task["user_rating"]))
+        except (ValueError, TypeError):
+            pass
+
+    threshold, min_scored = 3.5, 3
+    result = []
+    for name, data in stats.items():
+        all_scores = data["qa_scores"] + data["user_ratings"]
+        qa_avg  = sum(data["qa_scores"])    / len(data["qa_scores"])    if data["qa_scores"]    else None
+        rat_avg = sum(data["user_ratings"]) / len(data["user_ratings"]) if data["user_ratings"] else None
+        overall = sum(all_scores) / len(all_scores) if all_scores else None
+        needs_review = bool(overall and overall < threshold and len(all_scores) >= min_scored)
+        result.append({
+            "name":         name,
+            "task_count":   data["task_count"],
+            "qa_avg":       round(qa_avg,  2) if qa_avg  is not None else None,
+            "rating_avg":   round(rat_avg, 2) if rat_avg is not None else None,
+            "overall_avg":  round(overall, 2) if overall is not None else None,
+            "scored_tasks": len(all_scores),
+            "needs_review": needs_review,
+        })
+    result.sort(key=lambda x: (not x["needs_review"], -x["task_count"]))
+    return result
 
 # ── Agent data ────────────────────────────────────────────────────────────
 
@@ -896,11 +1001,23 @@ class Handler(BaseHTTPRequestHandler):
             "/api/status":       lambda: watcher.get_status(),
             "/api/schedules":    lambda: load_schedules(),
             "/api/notes":        lambda: get_notes(vid),
+            "/api/agent-stats":  lambda: get_agent_stats(vid),
         }
 
         if path == "/api/log":
             since = int(qs.get("since", [0])[0])
             self.send_json({"entries": get_log_entries(since)})
+            return
+
+        if path == "/api/session-read":
+            fname = qs.get("file", [""])[0]
+            vault_id_s = vid or load_settings().get("active_vault", "personal")
+            safe = re.sub(r"[^A-Za-z0-9 _\-.]", "", fname)
+            sf = VAULTS_DIR / vault_id_s / "sessions" / safe
+            if sf.exists() and sf.suffix == ".md":
+                self.send_json({"content": sf.read_text(encoding="utf-8")})
+            else:
+                self.send_json({"error": "not found"}, 404)
             return
 
         if path in simple_routes:
@@ -1195,6 +1312,94 @@ class Handler(BaseHTTPRequestHandler):
                 with _log_lock:
                     _log_buf.clear()
                 self.send_json({"ok": True})
+
+            elif p == "/api/task-rate":
+                self.send_json({"ok": rate_task(data["id"], data["rating"], vid)})
+
+            elif p == "/api/helm-review":
+                agent_name = data.get("agent", "").strip()
+                vault_id   = data.get("vault") or vid or load_settings().get("active_vault", "personal")
+                if not agent_name:
+                    self.send_json({"ok": False, "error": "no agent"}); return
+                # Gather recent completed tasks for this agent
+                tasks = [t for t in get_tasks(vault_id)
+                         if t.get("status") == "done" and t.get("assigned_to") == agent_name][-15:]
+                task_summaries = []
+                for t in tasks:
+                    full = get_task(t["id"], vault_id) or {}
+                    req  = (full.get("sections") or {}).get("request", "")[:200]
+                    out  = (full.get("sections") or {}).get("output",  "")[:300]
+                    qa   = t.get("qa_score", "?")
+                    rat  = t.get("user_rating", "?")
+                    task_summaries.append(
+                        f"- {t['id']}: {t['title']}\n  Request: {req}\n  Output: {out}\n  QA: {qa}/5  User: {rat}/5"
+                    )
+                profile_content, _ = get_agent_content(agent_name, vault_id)
+                stats = next((s for s in get_agent_stats(vault_id) if s["name"] == agent_name), {})
+                prompt = (
+                    f"You are Helm, the Resource & Team Manager for Console.\n"
+                    f"Review the {agent_name} agent's recent performance and rewrite their profile to improve it.\n\n"
+                    f"## Current profile:\n{profile_content or '(none)'}\n\n"
+                    f"## Recent completed tasks ({len(tasks)}):\n" + "\n".join(task_summaries) + "\n\n"
+                    f"Performance: overall avg {stats.get('overall_avg','?')}/5 across {stats.get('scored_tasks',0)} scored tasks.\n\n"
+                    f"Identify the patterns causing underperformance and rewrite the profile to address them.\n"
+                    f"Respond in this exact format:\n\n"
+                    f"DESCRIPTION: [2-3 sentences: what patterns you found and what you changed]\nPROFILE:\n[complete rewritten agent profile]"
+                )
+                log_event("helm", f"Reviewing agent: {agent_name}")
+                try:
+                    stdout, _, code = run_claude(prompt, timeout=120, vault_id=vault_id)
+                    desc_m    = re.search(r"DESCRIPTION:\s*(.+?)(?=\nPROFILE:)", stdout or "", re.DOTALL)
+                    profile_m = re.search(r"PROFILE:\n([\s\S]+)",                stdout or "")
+                    if desc_m and profile_m:
+                        log_event("helm", f"Review complete for {agent_name}")
+                        self.send_json({
+                            "ok": True,
+                            "description": desc_m.group(1).strip(),
+                            "profile":     profile_m.group(1).strip(),
+                        })
+                    else:
+                        self.send_json({"ok": False, "error": "Could not parse Helm response", "raw": stdout})
+                except subprocess.TimeoutExpired:
+                    self.send_json({"ok": False, "error": "Timed out"})
+
+            elif p == "/api/helm-create":
+                description = data.get("description", "").strip()
+                vault_id    = data.get("vault") or vid or load_settings().get("active_vault", "personal")
+                if not description:
+                    self.send_json({"ok": False, "error": "no description"}); return
+                existing = "\n".join(
+                    f"- {a['name']}: {a['role']}" for a in get_agents(vault_id)
+                )
+                prompt = (
+                    f"You are Helm, the Resource & Team Manager for Console.\n"
+                    f"A new capability is needed for the {vault_id} vault.\n\n"
+                    f"## Existing agents:\n{existing}\n\n"
+                    f"## Requested capability:\n{description}\n\n"
+                    f"Create a new agent profile that fills this gap without duplicating existing agents.\n"
+                    f"Respond in this exact format:\n\n"
+                    f"AGENT_NAME: [PascalCase name]\n"
+                    f"DESCRIPTION: [2-3 sentences: what gap this fills]\n"
+                    f"PROFILE:\n[complete agent profile in markdown]"
+                )
+                log_event("helm", f"Creating new agent for: {description[:60]}")
+                try:
+                    stdout, _, code = run_claude(prompt, timeout=120, vault_id=vault_id)
+                    name_m    = re.search(r"AGENT_NAME:\s*(\S+)",                   stdout or "")
+                    desc_m    = re.search(r"DESCRIPTION:\s*(.+?)(?=\nPROFILE:)",    stdout or "", re.DOTALL)
+                    profile_m = re.search(r"PROFILE:\n([\s\S]+)",                   stdout or "")
+                    if name_m and desc_m and profile_m:
+                        log_event("helm", f"New agent designed: {name_m.group(1)}")
+                        self.send_json({
+                            "ok":          True,
+                            "agent_name":  name_m.group(1).strip(),
+                            "description": desc_m.group(1).strip(),
+                            "profile":     profile_m.group(1).strip(),
+                        })
+                    else:
+                        self.send_json({"ok": False, "error": "Could not parse Helm response", "raw": stdout})
+                except subprocess.TimeoutExpired:
+                    self.send_json({"ok": False, "error": "Timed out"})
 
             else:
                 self.send_response(404)

@@ -75,7 +75,7 @@ body::before {
 .view.active { display: block; }
 #view-files.active     { display: flex; margin: -28px; height: calc(100vh - 48px); }
 #view-terminal.active  { display: flex; flex-direction: column; margin: -28px; height: calc(100vh - 48px); }
-#view-chat.active      { display: flex; flex-direction: column; margin: -28px; height: calc(100vh - 48px); }
+#view-chat.active      { display: flex; flex-direction: row;    margin: -28px; height: calc(100vh - 48px); }
 #view-org.active       { display: flex; justify-content: center; }
 
 /* ── Cards & panels ───────────────────────────────────────── */
@@ -357,6 +357,7 @@ body::before {
 .log-type.files    { color: #94a3b8; }
 .log-type.outbox   { color: #e879f9; }
 .log-type.system   { color: var(--muted); }
+.log-type.qa       { color: #a78bfa; }
 .log-entry.warn .log-msg  { color: #f59e0b; }
 .log-entry.error .log-msg { color: #f87171; }
 .log-empty { color: var(--muted); text-align: center; padding: 60px 0; font-size: 13px; }
@@ -435,6 +436,64 @@ body::before {
 .term-quick-btn:hover { border-color: var(--accent); color: var(--accent); }
 
 /* ── Chat (coming soon) ───────────────────────────────────── */
+/* ── Chat sidebar ─────────────────────────────────────────── */
+#chat-sidebar {
+  width: 200px; flex-shrink: 0; border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; background: var(--surface); overflow: hidden;
+}
+#chat-sidebar-header {
+  padding: 12px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+#chat-sidebar-header button { width: 100%; }
+#chat-session-list { flex: 1; overflow-y: auto; padding: 6px 0; }
+.chat-session-item {
+  padding: 8px 14px; cursor: pointer; font-size: 12px; line-height: 1.4;
+  border-left: 2px solid transparent; color: var(--muted);
+}
+.chat-session-item:hover { background: var(--bg); color: var(--text); }
+.chat-session-item.active { border-left-color: var(--accent); color: var(--text); background: var(--bg); }
+.chat-session-item .csi-date { font-size: 10px; color: var(--muted); margin-top: 2px; }
+#chat-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+/* ── Star rating ──────────────────────────────────────────── */
+.star-rating { display: inline-flex; gap: 2px; cursor: pointer; }
+.star-rating .star { font-size: 14px; color: var(--muted); line-height: 1; transition: color .1s; }
+.star-rating .star.filled { color: #f59e0b; }
+.star-rating .star:hover,
+.star-rating .star:hover ~ .star { color: var(--muted) !important; }
+.star-rating:hover .star { color: #f59e0b; }
+.task-card-rating { margin-top: 6px; display: flex; align-items: center; gap: 6px; }
+.task-card-rating .qa-chip {
+  font-size: 10px; font-family: var(--mono); color: var(--muted);
+  background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 1px 7px;
+}
+.modal-rating-row { display: flex; align-items: center; gap: 10px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+.modal-rating-row label { font-size: 11px; color: var(--muted); }
+
+/* ── Helm tab ─────────────────────────────────────────────── */
+.helm-section { margin-bottom: 28px; }
+.helm-section h3 { font-size: 13px; font-weight: 600; margin-bottom: 14px; }
+.agent-health-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.agent-health-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  padding: 14px 16px; position: relative;
+}
+.agent-health-card.needs-review { border-color: #f59e0b; }
+.ahc-name { font-size: 14px; font-weight: 600; margin-bottom: 6px; }
+.ahc-stats { font-size: 11px; color: var(--muted); display: flex; flex-direction: column; gap: 3px; }
+.ahc-score { font-size: 18px; font-weight: 700; color: var(--accent); }
+.ahc-score.warn { color: #f59e0b; }
+.ahc-score.danger { color: #f87171; }
+.ahc-actions { margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
+.helm-alert { background: rgba(245,158,11,.08); border: 1px solid #f59e0b; border-radius: 6px; padding: 10px 14px; margin-bottom: 14px; font-size: 12px; color: #f59e0b; }
+.helm-result-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin-top: 16px; }
+.helm-result-wrap h4 { font-size: 12px; font-weight: 600; margin-bottom: 8px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+.helm-description { font-size: 13px; line-height: 1.6; margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+.helm-profile-preview { font-family: var(--mono); font-size: 12px; background: var(--bg); border-radius: 4px; padding: 12px; max-height: 300px; overflow-y: auto; white-space: pre-wrap; margin-bottom: 14px; }
+.helm-profile-edit { font-family: var(--mono); font-size: 12px; width: 100%; min-height: 200px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 10px; color: var(--text); resize: vertical; }
+.helm-create-form { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px; }
+.helm-create-form textarea { width: 100%; min-height: 80px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px; color: var(--text); font-family: var(--sans); font-size: 13px; resize: vertical; margin: 10px 0; }
+
 /* ── Chat tab ─────────────────────────────────────────────── */
 #chat-header {
   display: flex; align-items: center; gap: 12px;
@@ -552,6 +611,7 @@ body::before {
       <div class="nav-tab active" data-view="tasks">Tasks <span class="badge hidden" id="pending-badge"></span></div>
       <div class="nav-tab" data-view="outbox">Outbox <span class="badge hidden" id="outbox-badge"></span></div>
       <div class="nav-tab" data-view="agents">Agents</div>
+      <div class="nav-tab" data-view="helm">Helm <span class="badge warn hidden" id="helm-badge"></span></div>
       <div class="nav-tab" data-view="org">Org</div>
       <div class="nav-tab" data-view="files">Files</div>
       <div class="nav-tab" data-view="terminal">Terminal</div>
@@ -719,25 +779,34 @@ body::before {
 
     <!-- ── Chat view ── -->
     <div id="view-chat" class="view">
-      <div id="chat-header">
-        <span class="chat-title">Agent Chat</span>
-        <span class="chat-vault-tag" id="chat-vault-tag">personal</span>
-        <span class="spacer"></span>
-        <button class="btn btn-ghost btn-sm" onclick="saveChatSession()">Save session</button>
-        <button class="btn btn-ghost btn-sm" onclick="newChat()">New chat</button>
-      </div>
-      <div id="chat-messages">
-        <div id="chat-empty">
-          <div class="ce-label">Agent Chat</div>
-          <div class="ce-sub">Talk directly to your agent team. The Orchestrator routes your message and responds as the right persona.</div>
+      <div id="chat-sidebar">
+        <div id="chat-sidebar-header">
+          <button class="btn btn-ghost btn-sm" onclick="newChat()">+ New Chat</button>
         </div>
-        <div class="chat-typing" id="chat-typing">
-          <div class="chat-bubble"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></div>
+        <div id="chat-session-list">
+          <div style="padding:12px 14px;color:var(--muted);font-size:11px;">No saved sessions</div>
         </div>
       </div>
-      <div id="chat-footer">
-        <textarea id="chat-input" rows="1" placeholder="Ask your agent team anything…"></textarea>
-        <button id="chat-send-btn" onclick="sendChatMessage()">Send</button>
+      <div id="chat-main">
+        <div id="chat-header">
+          <span class="chat-title">Agent Chat</span>
+          <span class="chat-vault-tag" id="chat-vault-tag">personal</span>
+          <span class="spacer"></span>
+          <button class="btn btn-ghost btn-sm" onclick="saveChatSession()">Save session</button>
+        </div>
+        <div id="chat-messages">
+          <div id="chat-empty">
+            <div class="ce-label">Agent Chat</div>
+            <div class="ce-sub">Talk directly to your agent team. The Orchestrator routes your message and responds as the right persona.</div>
+          </div>
+          <div class="chat-typing" id="chat-typing">
+            <div class="chat-bubble"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></div>
+          </div>
+        </div>
+        <div id="chat-footer">
+          <textarea id="chat-input" rows="1" placeholder="Ask your agent team anything…"></textarea>
+          <button id="chat-send-btn" onclick="sendChatMessage()">Send</button>
+        </div>
       </div>
     </div>
 
@@ -803,6 +872,53 @@ body::before {
           <button class="btn btn-ghost btn-sm" onclick="loadNotes()">↻</button>
         </div>
         <div id="nv-content"><div class="nv-empty">← Select a note to read it</div></div>
+      </div>
+    </div>
+
+    <!-- ── Helm view ── -->
+    <div id="view-helm" class="view">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+        <div>
+          <div style="font-size:18px; font-weight:700;">Helm — Resource Manager</div>
+          <div style="font-size:11px; color:var(--muted); margin-top:2px;">Agent team health, performance monitoring, and provisioning</div>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="loadHelm()">↻ Refresh</button>
+      </div>
+
+      <div class="helm-section">
+        <h3>Agent Health Roster</h3>
+        <div id="helm-alerts"></div>
+        <div id="agent-health-grid" class="agent-health-grid">
+          <div style="color:var(--muted);font-size:13px;">Open Helm to load agent stats.</div>
+        </div>
+      </div>
+
+      <div class="helm-section">
+        <h3>Review Agent</h3>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+          <input type="text" id="helm-review-name" placeholder="Agent name (e.g. Orchestrator)"
+            style="background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:7px 10px;font-size:13px;width:220px;font-family:var(--sans);">
+          <button class="btn btn-ghost btn-sm" onclick="triggerHelmReview()">Review</button>
+        </div>
+        <div id="helm-review-wrap"></div>
+      </div>
+
+      <div class="helm-section">
+        <h3>Create New Agent</h3>
+        <div class="helm-create-form">
+          <div class="form-group" style="margin-bottom:10px;">
+            <label style="font-size:11px;color:var(--muted);font-weight:500;">What capability does your team need?</label>
+            <textarea id="helm-create-desc" placeholder="Describe the capability gap or the role you need filled…"></textarea>
+          </div>
+          <div class="form-group" style="margin-bottom:14px;">
+            <label style="font-size:11px;color:var(--muted);font-weight:500;">Vault scope</label>
+            <select id="helm-create-vault" style="background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:7px 10px;font-size:13px;font-family:var(--sans);margin-top:4px;">
+              <option value="global">🌐 Global</option>
+            </select>
+          </div>
+          <button class="btn btn-primary" onclick="triggerHelmCreate()">Ask Helm to create agent</button>
+          <div id="helm-create-wrap" style="margin-top:16px;"></div>
+        </div>
       </div>
     </div>
 
@@ -905,6 +1021,7 @@ body::before {
         <textarea id="answer-input" placeholder="Type your answer…"></textarea>
         <button class="btn btn-primary btn-sm" onclick="submitAnswer()">Send</button>
       </div>
+      <div id="modal-rating-row" class="modal-rating-row" style="display:none;"></div>
     </div>
   </div>
 </div>
@@ -973,6 +1090,7 @@ document.querySelectorAll('.nav-tab').forEach(tab => {
     if (view === 'notes') loadNotes();
     if (view === 'log') startLogPolling(); else stopLogPolling();
     if (view === 'chat') initChat();
+    if (view === 'helm') loadHelm();
   });
 });
 
@@ -1050,10 +1168,25 @@ function renderKanban() {
   }).join('');
 }
 
+function renderStars(rating, interactive, taskId) {
+  const filled = Math.round(rating || 0);
+  const stars = [1,2,3,4,5].map(i => {
+    const cls = i <= filled ? 'star filled' : 'star';
+    const handler = interactive && taskId ? `onclick="rateTask('${taskId}',${i});event.stopPropagation();"` : '';
+    return `<span class="${cls}" ${handler}>★</span>`;
+  }).join('');
+  return `<div class="star-rating">${stars}</div>`;
+}
+
 function cardHTML(t) {
   const p = t.priority.toLowerCase();
   const preview = t.output_preview ? `<div class="kanban-card-output">${escHtml(t.output_preview)}</div>` : '';
   const waiting = t.waiting_question ? `<div class="waiting-q">❓ ${escHtml(t.waiting_question)}</div>` : '';
+  const hasRating = t.status === 'done' && (t.qa_score || t.user_rating);
+  const ratingHtml = hasRating ? `<div class="task-card-rating">
+    ${renderStars(t.user_rating || t.qa_score, false, t.id)}
+    ${t.qa_score ? `<span class="qa-chip">QA ${t.qa_score}/5</span>` : ''}
+  </div>` : '';
   return `<div class="kanban-card" onclick="openTaskModal('${t.id}')">
     <div class="kanban-card-id">${t.id}</div>
     <div class="kanban-card-title">${escHtml(t.title)}</div>
@@ -1061,7 +1194,7 @@ function cardHTML(t) {
       <span class="pill ${p}">${t.priority}</span>
       <span class="pill agent">${t.assigned_to}</span>
     </div>
-    ${waiting}${preview}
+    ${waiting}${preview}${ratingHtml}
   </div>`;
 }
 
@@ -1115,6 +1248,23 @@ async function openTaskModal(taskId) {
   statusBtns.innerHTML = nextStatuses.map(s =>
     `<button class="btn btn-ghost btn-sm" onclick="setStatus('${data.id}','${s}')">${s}</button>`
   ).join('');
+
+  const ratingRow = document.getElementById('modal-rating-row');
+  if (ratingRow) {
+    if (data.status === 'done') {
+      ratingRow.style.display = 'flex';
+      const userRating = data.user_rating || 0;
+      const qaScore    = data.qa_score    || 0;
+      ratingRow.innerHTML = `
+        <label>Your rating:</label>
+        ${renderStars(userRating, true, data.id)}
+        ${userRating ? `<span style="font-size:11px;color:var(--muted);">(${userRating}/5)</span>` : '<span style="font-size:11px;color:var(--muted);">click to rate</span>'}
+        ${qaScore ? `<span class="qa-chip" style="margin-left:8px;">Auto QA: ${qaScore}/5</span>` : ''}
+      `;
+    } else {
+      ratingRow.style.display = 'none';
+    }
+  }
 
   document.getElementById('task-modal-backdrop').classList.add('open');
 }
@@ -2027,6 +2177,65 @@ let chatBusy = false;
 function initChat() {
   const tag = document.getElementById('chat-vault-tag');
   if (tag) tag.textContent = currentVault || 'personal';
+  loadChatSessions();
+}
+
+async function loadChatSessions() {
+  const url = currentVault ? `/api/sessions?vault=${currentVault}` : '/api/sessions';
+  try {
+    const res = await fetch(url);
+    const sessions = await res.json();
+    renderChatSessionList(sessions);
+  } catch (_) {}
+}
+
+function renderChatSessionList(sessions) {
+  const el = document.getElementById('chat-session-list');
+  if (!el) return;
+  if (!sessions || !sessions.length) {
+    el.innerHTML = `<div style="padding:12px 14px;color:var(--muted);font-size:11px;">No saved sessions</div>`;
+    return;
+  }
+  el.innerHTML = sessions.map(s => {
+    const title = s.title || '';
+    const display = title.replace(/^\d{4}-\d{2}-\d{2}\s+\d{2}-\d{2}\s*-?\s*/, '').trim() || title;
+    const date = s.date || title.match(/(\d{4}-\d{2}-\d{2})/)?.[1] || '';
+    const safeTitle = escHtml(title);
+    return `<div class="chat-session-item" data-file="${safeTitle}" onclick="loadChatSession('${safeTitle}')">
+      <div>${escHtml(display)}</div>
+      ${date ? `<div class="csi-date">${date}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+async function loadChatSession(filename) {
+  const url = currentVault
+    ? `/api/session-read?file=${encodeURIComponent(filename)}&vault=${currentVault}`
+    : `/api/session-read?file=${encodeURIComponent(filename)}`;
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.error) return;
+    document.querySelectorAll('.chat-session-item').forEach(el =>
+      el.classList.toggle('active', el.dataset.file === filename));
+    chatHistory = parseSessionContent(data.content);
+    renderChatMessages();
+  } catch (_) {}
+}
+
+function parseSessionContent(content) {
+  const history = [];
+  if (!content) return history;
+  const body = content.replace(/^---\n[\s\S]*?\n---\n\n?/, '');
+  const parts = body.split(/\n---\n\n?/);
+  for (const part of parts) {
+    if (!part.trim()) continue;
+    const userMatch  = part.match(/^\*\*You\*\*\s*·\s*(.+)\n\n([\s\S]*)/);
+    const agentMatch = part.match(/^\*\*Orchestrator\*\*\s*·\s*(.+)\n\n([\s\S]*)/);
+    if (userMatch)  history.push({ role: 'user',      content: userMatch[2].trim(),  ts: userMatch[1].trim() });
+    else if (agentMatch) history.push({ role: 'assistant', content: agentMatch[2].trim(), ts: agentMatch[1].trim() });
+  }
+  return history;
 }
 
 function chatTimestamp() {
@@ -2112,6 +2321,7 @@ async function sendChatMessage() {
 
 function newChat() {
   chatHistory = [];
+  document.querySelectorAll('.chat-session-item').forEach(el => el.classList.remove('active'));
   renderChatMessages();
   document.getElementById('chat-input')?.focus();
 }
@@ -2121,7 +2331,8 @@ async function saveChatSession() {
   const date = new Date();
   const dateStr = date.toISOString().slice(0, 10);
   const timeStr = date.toTimeString().slice(0, 5).replace(':', '-');
-  const path = `sessions/${dateStr} ${timeStr} - Chat.md`;
+  const filename = `${dateStr} ${timeStr} - Chat`;
+  const path = `sessions/${filename}.md`;
   const lines = [`---\ndate: ${dateStr}\ntype: chat\ntags: [chat]\n---\n\n# Chat ${dateStr} ${timeStr}\n`];
   chatHistory.forEach(t => {
     const label = t.role === 'user' ? '**You**' : '**Orchestrator**';
@@ -2133,11 +2344,12 @@ async function saveChatSession() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path, content, vault: currentVault }),
   });
-  // Brief visual feedback on the button
+  // Brief visual feedback + refresh sidebar
   const btn = event.target;
   const orig = btn.textContent;
   btn.textContent = 'Saved ✓';
   setTimeout(() => { btn.textContent = orig; }, 2000);
+  loadChatSessions();
 }
 
 // Auto-resize textarea + Enter to send (Shift+Enter for newline)
@@ -2155,6 +2367,212 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 });
+
+// ── Task rating ──────────────────────────────────────────────
+async function rateTask(taskId, rating) {
+  const res = await fetch('/api/task-rate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: taskId, rating, vault: currentVault }),
+  });
+  const data = await res.json();
+  if (data.ok) {
+    // Update star display in modal immediately
+    const ratingRow = document.getElementById('modal-rating-row');
+    if (ratingRow && ratingRow.style.display !== 'none') {
+      ratingRow.querySelectorAll('.star').forEach((star, idx) =>
+        star.classList.toggle('filled', idx < rating));
+      const hint = ratingRow.querySelector('span[style*="click to rate"]');
+      if (hint) hint.textContent = `(${rating}/5)`;
+      const counted = ratingRow.querySelector('span[style*="color:var(--muted)"]');
+      if (counted) counted.textContent = `(${rating}/5)`;
+    }
+    loadAll();
+  }
+}
+
+// ── Helm ─────────────────────────────────────────────────────
+let helmData = null;
+
+async function loadHelm() {
+  const url = currentVault ? `/api/agent-stats?vault=${currentVault}` : '/api/agent-stats';
+  try {
+    const res = await fetch(url);
+    helmData = await res.json();   // returns plain array
+    renderAgentHealth(helmData);
+    updateHelmBadge(helmData);
+  } catch (_) {}
+
+  // Populate vault dropdown
+  const vaultSel = document.getElementById('helm-create-vault');
+  if (vaultSel) {
+    try {
+      const vRes = await fetch('/api/vaults');
+      const vaults = await vRes.json();
+      vaultSel.innerHTML = `<option value="global">🌐 Global</option>` +
+        vaults.map(v => `<option value="${v.id}">📁 ${escHtml(v.name)}</option>`).join('');
+      const active = vaults.find(v => v.active);
+      if (active) vaultSel.value = active.id;
+    } catch (_) {}
+  }
+}
+
+function updateHelmBadge(agents) {
+  const badge = document.getElementById('helm-badge');
+  if (!badge) return;
+  const count = (Array.isArray(agents) ? agents : []).filter(a => a.needs_review).length;
+  badge.textContent = count;
+  badge.classList.toggle('hidden', count === 0);
+}
+
+function renderAgentHealth(agents) {
+  const alertEl = document.getElementById('helm-alerts');
+  const gridEl  = document.getElementById('agent-health-grid');
+  if (!gridEl) return;
+
+  if (!Array.isArray(agents)) agents = [];
+  const needsReview = agents.filter(a => a.needs_review);
+
+  if (alertEl) {
+    alertEl.innerHTML = needsReview.map(a =>
+      `<div class="helm-alert">⚠ <strong>${escHtml(a.name)}</strong> is underperforming (avg ${(a.overall_avg||0).toFixed(1)}/5 across ${a.scored_tasks} scored tasks).
+       <a href="#" style="color:inherit;text-decoration:underline;margin-left:6px;" onclick="triggerHelmReview('${escHtml(a.name)}');return false;">Review now</a></div>`
+    ).join('');
+  }
+
+  if (!agents.length) {
+    gridEl.innerHTML = `<div style="color:var(--muted);font-size:13px;grid-column:1/-1;">No agent performance data yet — data accumulates as tasks complete with QA scoring.</div>`;
+    return;
+  }
+
+  gridEl.innerHTML = agents.map(a => {
+    const avg = a.overall_avg != null ? a.overall_avg.toFixed(1) : '—';
+    const scoreClass = a.overall_avg == null ? '' : a.overall_avg >= 4 ? '' : a.overall_avg >= 3.5 ? 'warn' : 'danger';
+    return `<div class="agent-health-card ${a.needs_review ? 'needs-review' : ''}">
+      <div class="ahc-name">${escHtml(a.name)}</div>
+      <div class="ahc-score ${scoreClass}">${avg}<span style="font-size:12px;font-weight:400;color:var(--muted);">/5</span></div>
+      <div class="ahc-stats">
+        <span>Tasks done: ${a.task_count || 0}</span>
+        <span>Scored: ${a.scored_tasks || 0}</span>
+        ${a.qa_avg    != null ? `<span>Auto QA avg: ${a.qa_avg.toFixed(1)}/5</span>`    : ''}
+        ${a.rating_avg != null ? `<span>User avg: ${a.rating_avg.toFixed(1)}/5</span>` : ''}
+      </div>
+      <div class="ahc-actions">
+        <button class="btn btn-ghost btn-sm" onclick="triggerHelmReview('${escHtml(a.name)}')">Review</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function triggerHelmReview(agentName) {
+  const nameInput = document.getElementById('helm-review-name');
+  const name = agentName || (nameInput ? nameInput.value.trim() : '');
+  if (!name) { alert('Enter an agent name to review.'); return; }
+  if (nameInput) nameInput.value = name;
+
+  const wrap = document.getElementById('helm-review-wrap');
+  wrap.innerHTML = `<div style="color:var(--muted);font-size:13px;padding:12px 0;">Helm is reviewing <strong>${escHtml(name)}</strong>…</div>`;
+
+  try {
+    const res = await fetch('/api/helm-review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_name: name, vault: currentVault }),
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      wrap.innerHTML = `<div style="color:var(--danger);font-size:13px;">${escHtml(data.error || 'Review failed')}</div>`;
+      return;
+    }
+    const profileEscaped = escHtml(data.profile || '');
+    wrap.innerHTML = `<div class="helm-result-wrap">
+      <h4>Helm's Assessment — ${escHtml(name)}</h4>
+      <div class="helm-description">${renderMarkdown(data.description || '')}</div>
+      <h4>Proposed Profile</h4>
+      <textarea class="helm-profile-edit" id="helm-profile-edit">${profileEscaped}</textarea>
+      <div style="display:flex;gap:8px;margin-top:10px;">
+        <button class="btn btn-primary" onclick="helmApprove('${escHtml(name)}')">Apply Profile</button>
+        <button class="btn btn-ghost" onclick="document.getElementById('helm-review-wrap').innerHTML=''">Discard</button>
+      </div>
+    </div>`;
+  } catch (e) {
+    wrap.innerHTML = `<div style="color:var(--danger);font-size:13px;">Request failed: ${escHtml(e.message)}</div>`;
+  }
+}
+
+async function helmApprove(agentName) {
+  const content = document.getElementById('helm-profile-edit')?.value;
+  if (!content) return;
+  const agent = agentsData.find(a => a.name === agentName);
+  const scope  = agent?.scope || 'global';
+  const res = await fetch('/api/agent-save', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: agentName, content, scope, vault: currentVault }),
+  });
+  const data = await res.json();
+  if (data.ok) {
+    document.getElementById('helm-review-wrap').innerHTML =
+      `<div style="color:var(--done);font-size:13px;padding:10px 0;">✓ ${escHtml(agentName)} profile updated successfully.</div>`;
+    loadAll();
+    loadHelm();
+  }
+}
+
+async function triggerHelmCreate() {
+  const desc = document.getElementById('helm-create-desc')?.value.trim();
+  if (!desc) { alert('Describe the capability gap first.'); return; }
+  const vault = document.getElementById('helm-create-vault')?.value || 'global';
+
+  const wrap = document.getElementById('helm-create-wrap');
+  wrap.innerHTML = `<div style="color:var(--muted);font-size:13px;">Helm is designing a new agent…</div>`;
+
+  try {
+    const res = await fetch('/api/helm-create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ description: desc, vault: currentVault }),
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      wrap.innerHTML = `<div style="color:var(--danger);font-size:13px;">${escHtml(data.error || 'Creation failed')}</div>`;
+      return;
+    }
+    const profileEscaped = escHtml(data.profile || '');
+    wrap.innerHTML = `<div class="helm-result-wrap">
+      <h4>New Agent: ${escHtml(data.agent_name)}</h4>
+      <div class="helm-description">${renderMarkdown(data.description || '')}</div>
+      <h4>Profile</h4>
+      <textarea class="helm-profile-edit" id="helm-create-profile-edit">${profileEscaped}</textarea>
+      <div style="display:flex;gap:8px;margin-top:10px;">
+        <button class="btn btn-primary" onclick="helmCreateApprove('${escHtml(data.agent_name)}','${escHtml(vault)}')">Save Agent</button>
+        <button class="btn btn-ghost" onclick="document.getElementById('helm-create-wrap').innerHTML=''">Discard</button>
+      </div>
+    </div>`;
+  } catch (e) {
+    wrap.innerHTML = `<div style="color:var(--danger);font-size:13px;">Request failed: ${escHtml(e.message)}</div>`;
+  }
+}
+
+async function helmCreateApprove(agentName, vault) {
+  const content = document.getElementById('helm-create-profile-edit')?.value;
+  if (!content) return;
+  const scope = vault === 'global' ? 'global' : 'vault';
+  const targetVault = vault === 'global' ? currentVault : vault;
+  const res = await fetch('/api/agent-save', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: agentName, content, scope, vault: targetVault }),
+  });
+  const data = await res.json();
+  if (data.ok) {
+    document.getElementById('helm-create-wrap').innerHTML =
+      `<div style="color:var(--done);font-size:13px;padding:10px 0;">✓ ${escHtml(agentName)} created and saved.</div>`;
+    if (document.getElementById('helm-create-desc')) document.getElementById('helm-create-desc').value = '';
+    loadAll();
+    loadHelm();
+  }
+}
 
 // ── Activity Log ─────────────────────────────────────────────
 let _logSeq = 0;
