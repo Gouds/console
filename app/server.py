@@ -812,6 +812,21 @@ def run_claude(prompt, timeout=300, vault_id=None):
     return result.stdout, result.stderr, result.returncode
 
 
+def _post_dispatch_hooks(vault_id):
+    """After dispatch, fire QA + BookWorm for tasks that became done via file writes
+    (bypassing set_task_status). Only targets tasks with no qa_score yet."""
+    try:
+        tasks = get_tasks(vault_id)
+        for t in tasks:
+            if t.get("status") == "done" and not t.get("qa_score"):
+                tid = t["id"]
+                log_event("qa", f"Post-dispatch QA for {tid}")
+                threading.Thread(target=_qa_task_output,   args=(tid, vault_id), daemon=True).start()
+                threading.Thread(target=_file_task_output, args=(tid, vault_id), daemon=True).start()
+    except Exception as e:
+        log_event("system", f"_post_dispatch_hooks error: {e}", level="warn")
+
+
 class TaskWatcher(threading.Thread):
     """Background thread: polls task folders, auto-dispatches when configured."""
 
@@ -894,6 +909,9 @@ class TaskWatcher(threading.Thread):
                 self._status["dispatching"] = False
             # Re-count after dispatch
             self._check(load_settings())
+            # Fire QA + BookWorm for any tasks that became done without going
+            # through set_task_status (claude --print writes files directly)
+            _post_dispatch_hooks(effective_vault)
 
     def get_status(self):
         with self._lock:
