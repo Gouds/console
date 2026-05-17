@@ -388,6 +388,8 @@ body::before {
 .nv-empty { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--muted); font-size: 13px; }
 #notes-search { width: 100%; padding: 8px 16px; background: var(--bg); border: none; border-bottom: 1px solid var(--border); color: var(--text); font-size: 12px; font-family: var(--sans); outline: none; }
 #notes-search::placeholder { color: var(--muted); }
+.note-item-snippet { font-size: 10px; color: var(--muted); margin-top: 2px; line-height: 1.4; font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.note-item-snippet mark { background: rgba(255,230,0,.25); color: var(--text); font-style: normal; border-radius: 2px; padding: 0 1px; }
 
 /* ── Settings tab ─────────────────────────────────────────── */
 .settings-section { max-width: 600px; margin-bottom: 28px; }
@@ -2199,11 +2201,12 @@ function renderChatSessionList(sessions) {
   }
   el.innerHTML = sessions.map(s => {
     const title = s.title || '';
-    const display = title.replace(/^\d{4}-\d{2}-\d{2}\s+\d{2}-\d{2}\s*-?\s*/, '').trim() || title;
+    // Strip YYYY-MM-DD HH-MM - prefix to show just the conversation title
+    const display = title.replace(/^\d{4}-\d{2}-\d{2}\s+\d{2}-\d{2}\s*-\s*/, '').trim() || 'Chat';
     const date = s.date || title.match(/(\d{4}-\d{2}-\d{2})/)?.[1] || '';
     const safeTitle = escHtml(title);
     return `<div class="chat-session-item" data-file="${safeTitle}" onclick="loadChatSession('${safeTitle}')">
-      <div>${escHtml(display)}</div>
+      <div style="font-weight:500;">${escHtml(display)}</div>
       ${date ? `<div class="csi-date">${date}</div>` : ''}
     </div>`;
   }).join('');
@@ -2335,18 +2338,32 @@ async function newChat() {
 // Track the filename for the current session so auto-save overwrites it
 let _currentSessionFilename = null;
 
+function _sessionTitle() {
+  // Derive a short title from the first user message
+  const firstUser = chatHistory.find(t => t.role === 'user');
+  if (!firstUser) return 'Chat';
+  return firstUser.content
+    .replace(/[^\w\s-]/g, '')   // strip punctuation
+    .trim()
+    .slice(0, 38)
+    .trim()
+    .replace(/\s+/g, ' ')       // normalise whitespace
+    || 'Chat';
+}
+
 async function saveChatSession(silent = false) {
   if (!chatHistory.length) return;
   const date = new Date();
   const dateStr = date.toISOString().slice(0, 10);
   const timeStr = date.toTimeString().slice(0, 5).replace(':', '-');
-  // Re-use the same filename for this session so repeated saves don't create duplicates
+  // Set filename on first save, using the first user message as the title
   if (!_currentSessionFilename) {
-    _currentSessionFilename = `${dateStr} ${timeStr} - Chat`;
+    _currentSessionFilename = `${dateStr} ${timeStr} - ${_sessionTitle()}`;
   }
   const filename = _currentSessionFilename;
   const path = `sessions/${filename}.md`;
-  const lines = [`---\ndate: ${dateStr}\ntype: chat\ntags: [chat]\n---\n\n# Chat ${dateStr} ${timeStr}\n`];
+  const title = _sessionTitle();
+  const lines = [`---\ndate: ${dateStr}\ntype: chat\ntags: [chat]\n---\n\n# ${title}\n`];
   chatHistory.forEach(t => {
     const label = t.role === 'user' ? '**You**' : '**Orchestrator**';
     lines.push(`${label} · ${t.ts}\n\n${t.content}\n`);
@@ -2678,13 +2695,40 @@ async function loadNotes() {
   renderNotesSidebar(notesData);
 }
 
-function renderNotesSidebar(notes) {
+function highlightSnippet(text, query) {
+  if (!query) return escHtml(text);
+  const idx = text.toLowerCase().indexOf(query.toLowerCase());
+  if (idx < 0) return escHtml(text);
+  return escHtml(text.slice(0, idx))
+    + `<mark>${escHtml(text.slice(idx, idx + query.length))}</mark>`
+    + escHtml(text.slice(idx + query.length));
+}
+
+function renderNotesSidebar(notes, searchQuery) {
   const el = document.getElementById('notes-tree');
   if (!el) return;
   if (!notes.length) {
-    el.innerHTML = `<div style="padding:20px 16px;color:var(--muted);font-size:12px;">No notes filed yet.<br><br>Notes are created automatically when tasks complete.</div>`;
+    el.innerHTML = `<div style="padding:20px 16px;color:var(--muted);font-size:12px;">${
+      searchQuery ? 'No notes matched your search.' : 'No notes filed yet.<br><br>Notes are created automatically when tasks complete.'
+    }</div>`;
     return;
   }
+
+  // Search results: flat list with snippets
+  if (searchQuery) {
+    el.innerHTML = notes.map(n => {
+      const sel = currentNotePath === n.path ? ' selected' : '';
+      const snippetHtml = n.snippet ? `<div class="note-item-snippet">${highlightSnippet(n.snippet, searchQuery)}</div>` : '';
+      return `<div class="note-item${sel}" onclick="openNote('${escHtml(n.path)}')">
+        <div class="note-item-title">${escHtml(n.title)}</div>
+        <div class="note-item-meta">${n.date || ''} · ${escHtml(n.category)}</div>
+        ${snippetHtml}
+      </div>`;
+    }).join('');
+    return;
+  }
+
+  // Normal browsing: grouped by category
   const cats = {};
   for (const n of notes) {
     (cats[n.category] = cats[n.category] || []).push(n);
@@ -2705,14 +2749,28 @@ function renderNotesSidebar(notes) {
   el.innerHTML = html;
 }
 
+let _searchTimer = null;
+
 function filterNotes(query) {
+  clearTimeout(_searchTimer);
   if (!query.trim()) { renderNotesSidebar(notesData); return; }
-  const q = query.toLowerCase();
-  renderNotesSidebar(notesData.filter(n =>
-    n.title.toLowerCase().includes(q) ||
-    (n.tags || '').toLowerCase().includes(q) ||
-    n.category.toLowerCase().includes(q)
-  ));
+  // Debounce full-text search by 250ms
+  _searchTimer = setTimeout(async () => {
+    const url = currentVault
+      ? `/api/notes-search?q=${encodeURIComponent(query)}&vault=${currentVault}`
+      : `/api/notes-search?q=${encodeURIComponent(query)}`;
+    try {
+      const res = await fetch(url);
+      const results = await res.json();
+      renderNotesSidebar(results, query);
+    } catch (_) {
+      // Fallback to title-only filter
+      renderNotesSidebar(notesData.filter(n =>
+        n.title.toLowerCase().includes(query.toLowerCase()) ||
+        (n.tags || '').toLowerCase().includes(query.toLowerCase())
+      ));
+    }
+  }, 250);
 }
 
 async function openNote(path) {

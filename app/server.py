@@ -700,6 +700,46 @@ def get_note(rel_path, vault_id=None):
         return None
     return f.read_text(encoding="utf-8") if f.exists() else None
 
+def search_notes(query, vault_id=None):
+    """Full-text search across all note files. Returns matching notes with a snippet."""
+    nd = notes_dir(vault_id)
+    q = query.lower().strip()
+    if not q:
+        return []
+    results = []
+    for category in NOTES_CATEGORIES:
+        cat_dir = nd / category
+        if not cat_dir.exists():
+            continue
+        for f in sorted(cat_dir.glob("*.md"), reverse=True):
+            text = f.read_text(encoding="utf-8")
+            text_lower = text.lower()
+            if q not in text_lower:
+                continue
+            fm = parse_frontmatter(text)
+            # Build a snippet: find the match location in the body
+            body = re.sub(r"^---\n[\s\S]*?\n---\n?", "", text).strip()
+            body_lower = body.lower()
+            idx = body_lower.find(q)
+            if idx >= 0:
+                start = max(0, idx - 60)
+                end   = min(len(body), idx + len(q) + 100)
+                raw_snippet = body[start:end].replace("\n", " ").strip()
+                snippet = ("…" if start > 0 else "") + raw_snippet + ("…" if end < len(body) else "")
+            else:
+                snippet = body[:160].replace("\n", " ").strip() + "…"
+            results.append({
+                "title":    f.stem,
+                "category": category,
+                "path":     f"{category}/{f.name}",
+                "date":     fm.get("date", ""),
+                "type":     fm.get("type", ""),
+                "source":   fm.get("source", ""),
+                "tags":     fm.get("tags", ""),
+                "snippet":  snippet,
+            })
+    return results
+
 # ── File browser ──────────────────────────────────────────────────────────
 
 TREE_EXCLUDE_DIRS = {".git", ".trash", "__pycache__", "node_modules", ".tmp"}
@@ -1029,6 +1069,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/status":       lambda: watcher.get_status(),
             "/api/schedules":    lambda: load_schedules(),
             "/api/notes":        lambda: get_notes(vid),
+            "/api/notes-search": lambda: search_notes(qs.get("q", [""])[0], vid),
             "/api/agent-stats":  lambda: get_agent_stats(vid),
         }
 
