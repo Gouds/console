@@ -1023,8 +1023,11 @@ class Handler(BaseHTTPRequestHandler):
             fname = qs.get("file", [""])[0]
             vault_id_s = vid or load_settings().get("active_vault", "personal")
             safe = re.sub(r"[^A-Za-z0-9 _\-.]", "", fname)
+            # Sessions list returns f.stem (no extension) — always resolve to .md
             sf = VAULTS_DIR / vault_id_s / "sessions" / safe
-            if sf.exists() and sf.suffix == ".md":
+            if sf.suffix != ".md":
+                sf = sf.with_suffix(".md")
+            if sf.exists():
                 self.send_json({"content": sf.read_text(encoding="utf-8")})
             else:
                 self.send_json({"error": "not found"}, 404)
