@@ -1317,7 +1317,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"ok": rate_task(data["id"], data["rating"], vid)})
 
             elif p == "/api/helm-review":
-                agent_name = data.get("agent", "").strip()
+                agent_name = (data.get("agent_name") or data.get("agent") or "").strip()
                 vault_id   = data.get("vault") or vid or load_settings().get("active_vault", "personal")
                 if not agent_name:
                     self.send_json({"ok": False, "error": "no agent"}); return
