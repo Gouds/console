@@ -1,0 +1,1092 @@
+#!/usr/bin/env python3
+"""Console — local-first AI agent operating system. HTTP server."""
+
+import datetime
+import json
+import re
+import subprocess
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
+from urllib.parse import urlparse, parse_qs
+
+ROOT          = Path(__file__).parent.parent   # Console/
+AGENTS_DIR    = ROOT / "agents"
+VAULTS_DIR    = ROOT / "vaults"
+SETTINGS_FILE = ROOT / "settings.json"
+SCHEDULES_FILE = ROOT / "schedules.json"
+APP_DIR       = Path(__file__).parent
+
+# ── Settings ──────────────────────────────────────────────────────────────
+
+def load_settings():
+    if SETTINGS_FILE.exists():
+        data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+    else:
+        data = {
+            "user": {"name": "Console User", "email": ""},
+            "console": {"name": "My Console", "port": 7842},
+            "active_vault": "personal",
+            "vaults": [{"id": "personal", "name": "Personal", "description": ""}],
+        }
+    data.setdefault("dispatch", {"poll_interval": 60, "auto_dispatch": False})
+    return data
+
+def save_settings(data):
+    _atomic_write(SETTINGS_FILE, json.dumps(data, indent=2, ensure_ascii=False))
+
+# ── Schedules ─────────────────────────────────────────────────────────────
+
+def load_schedules():
+    if SCHEDULES_FILE.exists():
+        return json.loads(SCHEDULES_FILE.read_text(encoding="utf-8"))
+    return {"schedules": []}
+
+def save_schedules(data):
+    _atomic_write(SCHEDULES_FILE, json.dumps(data, indent=2, ensure_ascii=False))
+
+def next_schedule_id():
+    data = load_schedules()
+    nums = [int(m.group()) for s in data.get("schedules", [])
+            for m in [re.search(r"\d+", s.get("id", ""))] if m]
+    return f"SCH-{(max(nums) + 1):03d}" if nums else "SCH-001"
+
+def get_vault_path(vault_id=None):
+    if vault_id is None:
+        vault_id = load_settings().get("active_vault", "personal")
+    return VAULTS_DIR / vault_id
+
+def get_port():
+    return load_settings().get("console", {}).get("port", 7842)
+
+# ── Helpers ───────────────────────────────────────────────────────────────
+
+def today():
+    return datetime.date.today().isoformat()
+
+def now_ts():
+    return datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+
+def _atomic_write(path, content):
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(content, encoding="utf-8")
+    tmp.replace(path)
+
+def parse_frontmatter(text):
+    m = re.match(r"^---\n(.*?)\n---\n?", text, re.DOTALL)
+    if not m:
+        return {}
+    fm = {}
+    for line in m.group(1).splitlines():
+        if ":" in line:
+            k, _, v = line.partition(":")
+            fm[k.strip()] = v.strip()
+    return fm
+
+# ── Task helpers ──────────────────────────────────────────────────────────
+
+VALID_STATUSES = {"pending", "in-progress", "waiting-input", "blocked", "done"}
+
+def tasks_dir(vault_id=None):
+    return get_vault_path(vault_id) / "tasks"
+
+def next_task_id(vault_id=None):
+    td = tasks_dir(vault_id)
+    td.mkdir(parents=True, exist_ok=True)
+    nums = []
+    for f in td.glob("TASK-*.md"):
+        m = re.search(r"TASK-(\d+)", f.stem)
+        if m:
+            nums.append(int(m.group(1)))
+    return f"TASK-{(max(nums) + 1):03d}" if nums else "TASK-001"
+
+def slugify(text):
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:48]
+
+def build_task_file(fm, sections):
+    waiting_section = ""
+    if fm.get("status") == "waiting-input" or sections.get("waiting_for_input"):
+        wfi = sections.get("waiting_for_input") or ""
+        waiting_section = f"\n---\n\n## Waiting For Input\n\n{wfi}\n"
+    return f"""---
+id: {fm.get('id', '')}
+title: {fm.get('title', '')}
+status: {fm.get('status', 'pending')}
+assigned_to: {fm.get('assigned_to', 'Orchestrator')}
+priority: {fm.get('priority', 'Medium')}
+created: {fm.get('created', today())}
+updated: {fm.get('updated', today())}
+type: task
+---
+
+## Request
+
+{sections.get('request', '').strip()}
+
+---
+
+## Context
+
+{sections.get('context', '—').strip()}
+
+---
+
+## Progress Log
+
+{sections.get('progress_log', '').strip()}
+{waiting_section}
+---
+
+## Output
+
+{sections.get('output', '*Pending.*').strip()}
+"""
+
+def parse_task_file(text):
+    fm = parse_frontmatter(text)
+    body = re.sub(r"^---\n.*?\n---\n?", "", text, flags=re.DOTALL).strip()
+
+    def extract(heading):
+        pattern = rf"## {heading}\n(.*?)(?=\n---\n|\Z)"
+        m = re.search(pattern, body, re.DOTALL)
+        return m.group(1).strip() if m else ""
+
+    return fm, {
+        "request":           extract("Request"),
+        "context":           extract("Context"),
+        "progress_log":      extract("Progress Log"),
+        "waiting_for_input": extract("Waiting For Input"),
+        "output":            extract("Output"),
+    }
+
+def find_task_file(task_id, vault_id=None):
+    td = tasks_dir(vault_id)
+    safe = re.sub(r"[^A-Z0-9-]", "", task_id.upper())
+    matches = list(td.glob(f"{safe}-*.md"))
+    if matches:
+        return matches[0]
+    exact = td / f"{safe}.md"
+    return exact if exact.exists() else None
+
+def _output_preview(output_text):
+    text = output_text.strip()
+    if not text or text in ("*Pending.*", "*In progress.*"):
+        return ""
+    text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
+    text = re.sub(r"\*{1,2}(.+?)\*{1,2}", r"\1", text)
+    text = re.sub(r"`(.+?)`", r"\1", text)
+    for line in text.splitlines():
+        line = line.strip().lstrip("-•1234567890. ")
+        if line and (" " in line or len(line) > 30):
+            return line[:120] + ("…" if len(line) > 120 else "")
+    return ""
+
+def _extract_question(wfi_text):
+    m = re.search(r"\*\*Question:\*\*\s*(.+?)(?:\n|$)", wfi_text)
+    return m.group(1).strip() if m else ""
+
+# ── Task CRUD ─────────────────────────────────────────────────────────────
+
+def get_tasks(vault_id=None):
+    td = tasks_dir(vault_id)
+    td.mkdir(parents=True, exist_ok=True)
+    result = []
+    for f in sorted(td.glob("TASK-*.md")):
+        text = f.read_text(encoding="utf-8")
+        fm, sections = parse_task_file(text)
+        result.append({
+            "id":             fm.get("id", f.stem),
+            "title":          fm.get("title", ""),
+            "status":         fm.get("status", "pending"),
+            "assigned_to":    fm.get("assigned_to", ""),
+            "priority":       fm.get("priority", "Medium"),
+            "created":        fm.get("created", ""),
+            "updated":        fm.get("updated", ""),
+            "file":           f.name,
+            "waiting_question": _extract_question(sections.get("waiting_for_input", "")),
+            "output_preview": _output_preview(sections.get("output", "")),
+        })
+    return result
+
+def get_task(task_id, vault_id=None):
+    f = find_task_file(task_id, vault_id)
+    if not f:
+        return None
+    text = f.read_text(encoding="utf-8")
+    fm, sections = parse_task_file(text)
+    return {**fm, "sections": sections, "file": f.name}
+
+def create_task(title, request, context="", priority="Medium", assigned_to="Orchestrator", vault_id=None):
+    task_id = next_task_id(vault_id)
+    fm = {"id": task_id, "title": title, "status": "pending",
+          "assigned_to": assigned_to, "priority": priority,
+          "created": today(), "updated": today()}
+    sections = {
+        "request": request, "context": context or "—",
+        "progress_log": f"- **{now_ts()}** — Task created. Assigned to {assigned_to}.",
+        "waiting_for_input": "", "output": "*Pending.*",
+    }
+    dest = tasks_dir(vault_id) / f"{task_id}-{slugify(title)}.md"
+    dest.write_text(build_task_file(fm, sections), encoding="utf-8")
+    return task_id
+
+def append_progress(task_id, entry, vault_id=None):
+    f = find_task_file(task_id, vault_id)
+    if not f:
+        return False
+    text = f.read_text(encoding="utf-8")
+    fm, sections = parse_task_file(text)
+    log = sections.get("progress_log", "").strip()
+    sections["progress_log"] = f"{log}\n- **{now_ts()}** — {entry}".strip()
+    fm["updated"] = today()
+    _atomic_write(f, build_task_file(fm, sections))
+    return True
+
+def set_task_status(task_id, new_status, vault_id=None):
+    if new_status not in VALID_STATUSES:
+        return False, f"Invalid status: {new_status}"
+    f = find_task_file(task_id, vault_id)
+    if not f:
+        return False, "Task not found"
+    text = f.read_text(encoding="utf-8")
+    fm, sections = parse_task_file(text)
+    old_status = fm.get("status", "pending")
+    if old_status == "waiting-input" and new_status != "waiting-input":
+        wfi = sections.get("waiting_for_input", "").strip()
+        if wfi:
+            q = _extract_question(wfi)
+            log = sections.get("progress_log", "").strip()
+            sections["progress_log"] = f"{log}\n- **{now_ts()}** — Left waiting-input. Question: {q[:80]}".strip()
+        sections["waiting_for_input"] = ""
+    fm["status"] = new_status
+    fm["updated"] = today()
+    log = sections.get("progress_log", "").strip()
+    sections["progress_log"] = f"{log}\n- **{now_ts()}** — Status → {new_status}.".strip()
+    _atomic_write(f, build_task_file(fm, sections))
+    if new_status == "done":
+        resolved_vault = vault_id or load_settings().get("active_vault", "personal")
+        threading.Thread(
+            target=_file_task_output, args=(task_id, resolved_vault), daemon=True
+        ).start()
+    return True, "ok"
+
+def answer_task(task_id, answer, vault_id=None):
+    f = find_task_file(task_id, vault_id)
+    if not f:
+        return False
+    text = f.read_text(encoding="utf-8")
+    fm, sections = parse_task_file(text)
+    wfi = sections.get("waiting_for_input", "")
+    if "**Your Answer:**" in wfi:
+        wfi = re.sub(r"\*\*Your Answer:\*\*.*", f"**Your Answer:** {answer}", wfi, flags=re.DOTALL)
+    else:
+        wfi = f"{wfi}\n\n**Your Answer:** {answer}"
+    sections["waiting_for_input"] = wfi.strip()
+    short = answer[:80] + ("…" if len(answer) > 80 else "")
+    log = sections.get("progress_log", "").strip()
+    sections["progress_log"] = f"{log}\n- **{now_ts()}** — User answered: {short}. Status → in-progress.".strip()
+    fm["status"] = "in-progress"
+    fm["updated"] = today()
+    _atomic_write(f, build_task_file(fm, sections))
+    return True
+
+# ── Agent data ────────────────────────────────────────────────────────────
+
+AGENT_EMOJIS = {
+    "Orchestrator": "🎯", "Scout": "🔍", "Herald": "✉️",
+    "Helm": "🧭", "Scribe": "✍️", "Analyst": "📊",
+}
+
+# Global fallback — agents can also declare reports_to in their frontmatter
+ORG_REPORTS_TO = {
+    "Orchestrator": None,
+    "Helm":         "Orchestrator",
+    "Scout":        "Orchestrator",
+    "Herald":       "Orchestrator",
+}
+
+def vault_agents_dir(vault_id=None):
+    return get_vault_path(vault_id) / "agents"
+
+def _read_agent_file(f, scope, vault_id=None):
+    text = f.read_text(encoding="utf-8")
+    fm = parse_frontmatter(text)
+    name = fm.get("agent", f.stem)
+    tagline_match = re.search(r'> \*"(.+?)"\*', text)
+    reports_to = fm.get("reports_to") or ORG_REPORTS_TO.get(name)
+    return {
+        "name":       name,
+        "role":       fm.get("role", ""),
+        "status":     fm.get("status", "Active"),
+        "emoji":      fm.get("emoji", AGENT_EMOJIS.get(name, "🤖")),
+        "tagline":    tagline_match.group(1) if tagline_match else "",
+        "file":       f.name,
+        "reports_to": reports_to,
+        "scope":      scope,
+        "vault":      vault_id if scope == "vault" else None,
+    }
+
+def get_agents(vault_id=None):
+    agents = {}
+    # Global agents first
+    for f in sorted(AGENTS_DIR.glob("*.md")):
+        a = _read_agent_file(f, "global")
+        agents[a["name"]] = a
+    # Vault agents override globals of the same name
+    vad = vault_agents_dir(vault_id)
+    if vad.exists():
+        resolved_id = vault_id or load_settings().get("active_vault", "personal")
+        for f in sorted(vad.glob("*.md")):
+            a = _read_agent_file(f, "vault", resolved_id)
+            agents[a["name"]] = a
+    return sorted(agents.values(), key=lambda a: a["name"])
+
+def get_org_chart(vault_id=None):
+    agent_map = {a["name"]: {**a, "children": []} for a in get_agents(vault_id)}
+    root = None
+    for name, agent in agent_map.items():
+        parent = agent.get("reports_to")
+        if parent is None:
+            root = name
+        elif parent in agent_map:
+            agent_map[parent]["children"].append(agent)
+    return agent_map.get(root or "Orchestrator", {})
+
+def get_agent_content(name, vault_id=None):
+    safe = re.sub(r"[^A-Za-z0-9 _-]", "", name)
+    # Vault-specific agent takes priority
+    if vault_id:
+        vf = vault_agents_dir(vault_id) / f"{safe}.md"
+        if vf.exists():
+            return vf.read_text(encoding="utf-8"), "vault"
+    gf = AGENTS_DIR / f"{safe}.md"
+    if gf.exists():
+        return gf.read_text(encoding="utf-8"), "global"
+    return None, None
+
+def save_agent_content(name, content, vault_id=None, scope="vault"):
+    safe = re.sub(r"[^A-Za-z0-9 _-]", "", name)
+    if scope == "vault" and vault_id:
+        d = vault_agents_dir(vault_id)
+        d.mkdir(parents=True, exist_ok=True)
+        f = d / f"{safe}.md"
+    else:
+        f = AGENTS_DIR / f"{safe}.md"
+    f.write_text(content, encoding="utf-8")
+    return True
+
+# ── Inbox ─────────────────────────────────────────────────────────────────
+
+def get_inbox(vault_id=None):
+    inbox_file = get_vault_path(vault_id) / "inbox" / "inbox.md"
+    if not inbox_file.exists():
+        return []
+    text = inbox_file.read_text(encoding="utf-8")
+    tasks, in_table = [], False
+    for line in text.splitlines():
+        if line.startswith("| Date |"):
+            in_table = True; continue
+        if in_table and line.startswith("|---"):
+            continue
+        if in_table and line.startswith("|"):
+            cols = [c.strip() for c in line.strip("|").split("|")]
+            if len(cols) >= 5 and any(cols):
+                date, task, priority, status, agent = (cols + [""] * 5)[:5]
+                if task:
+                    tasks.append({"date": date, "task": task,
+                                  "priority": priority or "Medium",
+                                  "status": status or "Pending", "agent": agent})
+        elif in_table:
+            in_table = False
+    return tasks
+
+# ── Outbox ────────────────────────────────────────────────────────────────
+
+def outbox_file(vault_id=None):
+    return get_vault_path(vault_id) / "outbox" / "outbox.md"
+
+def parse_outbox(vault_id=None):
+    of = outbox_file(vault_id)
+    if not of.exists():
+        return []
+    text = of.read_text(encoding="utf-8")
+    text = re.sub(r"^---\n.*?\n---\n?", "", text, flags=re.DOTALL).strip()
+    blocks = re.split(r"\n---\n", text)
+    entries = []
+    for block in blocks:
+        block = block.strip()
+        if not block or block.startswith("#"):
+            continue
+        block = re.sub(r"^-{3,}\n+", "", block)
+        if not block:
+            continue
+        parts = re.split(r"\n\n", block, maxsplit=1)
+        header = parts[0]
+        body = parts[1].strip() if len(parts) > 1 else ""
+        entry = {}
+        for m in re.finditer(r"\*\*(\w+):\*\*\s*([^|*\n]+)", header):
+            entry[m.group(1).lower()] = m.group(2).strip()
+        if not entry.get("id"):
+            continue
+        entry["body"] = body
+        entries.append(entry)
+    return entries
+
+def next_outbox_id(vault_id=None):
+    entries = parse_outbox(vault_id)
+    nums = [int(m.group()) for e in entries
+            for m in [re.search(r"\d+", e.get("id", ""))] if m]
+    return f"OUT-{(max(nums) + 1):03d}" if nums else "OUT-001"
+
+def add_outbox_entry(task_id, agent, entry_type, to_addr, subject, body, vault_id=None):
+    oid = next_outbox_id(vault_id)
+    block = (
+        f"\n---\n\n"
+        f"**id:** {oid} | **task:** {task_id} | **agent:** {agent} | **date:** {today()}\n"
+        f"**type:** {entry_type}\n**to:** {to_addr}\n**subject:** {subject}\n\n{body}\n"
+    )
+    of = outbox_file(vault_id)
+    if not of.exists():
+        of.write_text("---\ntype: outbox\n---\n\n# Outbox\n\nDrafts awaiting review.\n" + block, encoding="utf-8")
+    else:
+        current = re.sub(r'\n-{3,}\s*$', '', of.read_text(encoding="utf-8").rstrip())
+        _atomic_write(of, current + block)
+    return oid
+
+def discard_outbox_entry(oid, vault_id=None):
+    of = outbox_file(vault_id)
+    if not of.exists():
+        return False
+    text = of.read_text(encoding="utf-8")
+    fm_match = re.match(r"^(---\n.*?\n---\n?)(.*)", text, re.DOTALL)
+    fm_header, body = (fm_match.group(1), fm_match.group(2)) if fm_match else ("", text)
+    parts = body.split("\n---\n")
+    filtered = [p for p in parts if f"**id:** {oid}" not in p]
+    _atomic_write(of, fm_header + "\n---\n".join(filtered))
+    return True
+
+# ── Sessions ──────────────────────────────────────────────────────────────
+
+def get_sessions(vault_id=None):
+    sessions_dir = get_vault_path(vault_id) / "sessions"
+    if not sessions_dir.exists():
+        return []
+    result = []
+    for f in sorted(sessions_dir.glob("*.md"), reverse=True)[:20]:
+        text = f.read_text(encoding="utf-8")
+        fm = parse_frontmatter(text)
+        result.append({
+            "title":  f.stem,
+            "date":   fm.get("creation date", fm.get("date", "")),
+            "domain": fm.get("domain", ""),
+            "topic":  fm.get("topic", f.stem),
+        })
+    return result
+
+# ── Vault info ────────────────────────────────────────────────────────────
+
+EMPTY_INTEGRATIONS = {
+    "email":    {"provider": None, "address": None},
+    "calendar": {"provider": None, "address": None},
+}
+
+def get_vault_config(vault_id=None):
+    if vault_id is None:
+        vault_id = load_settings().get("active_vault", "personal")
+    vf = VAULTS_DIR / vault_id / "vault.json"
+    if vf.exists():
+        data = json.loads(vf.read_text(encoding="utf-8"))
+    else:
+        data = {"id": vault_id, "integrations": {}, "apps": []}
+    # Ensure integrations keys always present
+    data.setdefault("integrations", {})
+    for key, default in EMPTY_INTEGRATIONS.items():
+        data["integrations"].setdefault(key, dict(default))
+    data.setdefault("apps", [])
+    return data
+
+def save_vault_config(vault_id, data):
+    vf = VAULTS_DIR / vault_id / "vault.json"
+    _atomic_write(vf, json.dumps(data, indent=2, ensure_ascii=False))
+
+def get_vaults():
+    settings = load_settings()
+    active = settings.get("active_vault", "personal")
+    result = []
+    for v in settings.get("vaults", []):
+        cfg = get_vault_config(v["id"])
+        integrations = cfg.get("integrations", {})
+        result.append({
+            **v,
+            "active": v["id"] == active,
+            "integrations": integrations,
+        })
+    return result
+
+# ── Notes ─────────────────────────────────────────────────────────────────
+
+NOTES_CATEGORIES = ["Daily Briefs", "Research", "Reference", "Decisions", "Inbox"]
+
+def notes_dir(vault_id=None):
+    return get_vault_path(vault_id) / "notes"
+
+def get_notes(vault_id=None):
+    nd = notes_dir(vault_id)
+    result = []
+    for category in NOTES_CATEGORIES:
+        cat_dir = nd / category
+        if not cat_dir.exists():
+            continue
+        for f in sorted(cat_dir.glob("*.md"), reverse=True):
+            text = f.read_text(encoding="utf-8")
+            fm = parse_frontmatter(text)
+            result.append({
+                "title":    f.stem,
+                "category": category,
+                "path":     f"{category}/{f.name}",
+                "date":     fm.get("date", ""),
+                "type":     fm.get("type", ""),
+                "source":   fm.get("source", ""),
+                "tags":     fm.get("tags", ""),
+            })
+    return result
+
+def get_note(rel_path, vault_id=None):
+    nd = notes_dir(vault_id)
+    f = (nd / rel_path).resolve()
+    if not str(f).startswith(str(nd.resolve())):
+        return None
+    return f.read_text(encoding="utf-8") if f.exists() else None
+
+# ── File browser ──────────────────────────────────────────────────────────
+
+TREE_EXCLUDE_DIRS = {".git", ".trash", "__pycache__", "node_modules", ".tmp"}
+TREE_EXCLUDE_EXTS = {".tmp", ".pyc", ".pyo"}
+
+MIME_MAP = {
+    "md":"text/plain; charset=utf-8", "txt":"text/plain; charset=utf-8",
+    "py":"text/plain; charset=utf-8", "js":"text/plain; charset=utf-8",
+    "json":"text/plain; charset=utf-8", "html":"text/plain; charset=utf-8",
+    "css":"text/plain; charset=utf-8", "sh":"text/plain; charset=utf-8",
+    "yaml":"text/plain; charset=utf-8", "yml":"text/plain; charset=utf-8",
+    "csv":"text/plain; charset=utf-8", "toml":"text/plain; charset=utf-8",
+    "pdf":"application/pdf",
+    "png":"image/png", "jpg":"image/jpeg", "jpeg":"image/jpeg",
+    "gif":"image/gif", "webp":"image/webp", "svg":"image/svg+xml",
+}
+
+def build_vault_tree(vault_id=None):
+    root = get_vault_path(vault_id)
+    return _tree_children(root, "")
+
+def _tree_children(path, rel):
+    children = []
+    try:
+        items = sorted(path.iterdir(), key=lambda x: (x.is_file(), x.name.lower()))
+    except PermissionError:
+        return []
+    for item in items:
+        name = item.name
+        if name.startswith(".") or name in TREE_EXCLUDE_DIRS:
+            continue
+        rel_path = f"{rel}/{name}" if rel else name
+        if item.is_dir():
+            children.append({"name": name, "path": rel_path, "type": "dir",
+                              "children": _tree_children(item, rel_path)})
+        elif item.is_file():
+            if item.suffix.lower() in TREE_EXCLUDE_EXTS or name in TREE_EXCLUDE_EXTS:
+                continue
+            children.append({"name": name, "path": rel_path, "type": "file",
+                              "ext": item.suffix.lower().lstrip(".")})
+    return children
+
+def safe_vault_file_path(rel_path, vault_id=None):
+    root = get_vault_path(vault_id).resolve()
+    resolved = (root / rel_path).resolve()
+    if not str(resolved).startswith(str(root)):
+        raise ValueError("Path outside vault")
+    if not resolved.exists():
+        raise FileNotFoundError("File not found")
+    return resolved
+
+def save_vault_file(rel_path, content, vault_id=None):
+    p = safe_vault_file_path(rel_path, vault_id)
+    editable = {".md", ".txt", ".json", ".yaml", ".yml", ".py", ".sh", ".css", ".js"}
+    if p.suffix.lower() not in editable:
+        raise ValueError("File type not editable")
+    _atomic_write(p, content)
+    return True
+
+# ── Auto-filing ───────────────────────────────────────────────────────────
+
+def _file_task_output(task_id, vault_id):
+    """Background: ask Claude to file a completed task output via BookWorm."""
+    prompt = (
+        f"A task has just completed: {task_id} in the {vault_id} vault. "
+        f"Act as BookWorm. Read the task file from vaults/{vault_id}/tasks/, "
+        f"read the BookWorm agent profile at vaults/{vault_id}/agents/BookWorm.md, "
+        f"determine the correct category and title, then create the note at "
+        f"vaults/{vault_id}/notes/[Category]/[Title].md using the standard portable "
+        f"note format (YAML frontmatter + CommonMark only, no wikilinks or callouts)."
+    )
+    try:
+        run_claude(prompt, timeout=180)
+    except Exception:
+        pass
+
+# ── Task watcher ──────────────────────────────────────────────────────────
+
+CLAUDE_BIN = subprocess.run(
+    ["which", "claude"], capture_output=True, text=True
+).stdout.strip() or "claude"
+
+def run_claude(prompt, timeout=300):
+    """Run claude --print non-interactively from the Console root."""
+    result = subprocess.run(
+        f'echo {json.dumps(prompt)} | {CLAUDE_BIN} --print --permission-mode bypassPermissions',
+        shell=True, cwd=str(ROOT), capture_output=True, text=True, timeout=timeout,
+    )
+    return result.stdout, result.stderr, result.returncode
+
+
+class TaskWatcher(threading.Thread):
+    """Background thread: polls task folders, auto-dispatches when configured."""
+
+    def __init__(self):
+        super().__init__(daemon=True, name="TaskWatcher")
+        self._lock = threading.Lock()
+        self._status = {
+            "pending": 0,
+            "in_progress": 0,
+            "waiting_input": 0,
+            "last_check": None,
+            "last_dispatch": None,
+            "dispatching": False,
+            "poll_interval": 0,
+            "watching": False,
+        }
+
+    def run(self):
+        while True:
+            settings = load_settings()
+            interval = int(settings.get("dispatch", {}).get("poll_interval", 0))
+            if interval > 0:
+                self._check(settings)
+                time.sleep(interval)
+            else:
+                time.sleep(15)
+
+    def _count_tasks(self, settings):
+        counts = {"pending": 0, "in_progress": 0, "waiting_input": 0}
+        for vault in settings.get("vaults", []):
+            for task in get_tasks(vault["id"]):
+                s = task.get("status", "")
+                if s == "pending":         counts["pending"]       += 1
+                elif s == "in-progress":   counts["in_progress"]   += 1
+                elif s == "waiting-input": counts["waiting_input"] += 1
+        return counts
+
+    def _check(self, settings):
+        counts = self._count_tasks(settings)
+        auto = settings.get("dispatch", {}).get("auto_dispatch", False)
+        with self._lock:
+            self._status.update({
+                **counts,
+                "last_check": now_ts(),
+                "poll_interval": int(settings.get("dispatch", {}).get("poll_interval", 0)),
+                "watching": True,
+            })
+        if auto and counts["pending"] > 0:
+            self._dispatch()
+
+    def _dispatch(self):
+        with self._lock:
+            if self._status.get("dispatching"):
+                return  # already running
+            self._status["dispatching"] = True
+        try:
+            stdout, stderr, code = run_claude("/dispatch")
+            with self._lock:
+                self._status["last_dispatch"] = {
+                    "time": now_ts(),
+                    "output": stdout[-3000:] if stdout else "",
+                    "error": stderr[-500:] if stderr else "",
+                    "exit_code": code,
+                }
+        except subprocess.TimeoutExpired:
+            with self._lock:
+                self._status["last_dispatch"] = {
+                    "time": now_ts(), "output": "", "error": "Dispatch timed out", "exit_code": -1
+                }
+        finally:
+            with self._lock:
+                self._status["dispatching"] = False
+            # Re-count after dispatch
+            self._check(load_settings())
+
+    def get_status(self):
+        with self._lock:
+            return dict(self._status)
+
+    def force_check(self):
+        self._check(load_settings())
+
+    def force_dispatch(self):
+        threading.Thread(target=self._dispatch, daemon=True).start()
+
+
+watcher = TaskWatcher()
+watcher.start()
+
+# ── Scheduler ─────────────────────────────────────────────────────────────
+
+class Scheduler(threading.Thread):
+    """Background thread: fires scheduled tasks at configured times."""
+
+    def __init__(self):
+        super().__init__(daemon=True, name="Scheduler")
+
+    def run(self):
+        while True:
+            try:
+                self._tick()
+            except Exception:
+                pass
+            time.sleep(60)
+
+    def _tick(self):
+        data = load_schedules()
+        now = datetime.datetime.now()
+        today_str = now.date().isoformat()
+        current_hhmm = now.strftime("%H:%M")
+        changed = False
+
+        for sched in data.get("schedules", []):
+            if not sched.get("enabled", True):
+                continue
+            last_run = sched.get("last_run") or ""
+            sched_time = sched.get("time", "08:00")
+            frequency = sched.get("schedule", "daily")
+
+            due = False
+            if frequency == "daily":
+                due = last_run < today_str and current_hhmm >= sched_time
+
+            if due:
+                self._fire(sched)
+                sched["last_run"] = today_str
+                changed = True
+
+        if changed:
+            save_schedules(data)
+
+    def _fire(self, sched):
+        vault_id = sched.get("vault", "personal")
+        create_task(
+            sched.get("name", "Scheduled Task"),
+            sched.get("prompt", ""),
+            context=f"Scheduled {sched.get('schedule','daily')} at {sched.get('time','08:00')}",
+            vault_id=vault_id,
+        )
+        watcher.force_dispatch()
+
+
+scheduler = Scheduler()
+scheduler.start()
+
+# ── HTTP Handler ───────────────────────────────────────────────────────────
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, format, *args):
+        pass
+
+    def vault_id(self, qs):
+        return qs.get("vault", [None])[0]
+
+    def send_json(self, data, status=200):
+        body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Content-Length", len(body))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.end_headers()
+
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        qs = parse_qs(parsed.query)
+        path = parsed.path
+        vid = self.vault_id(qs)
+
+        simple_routes = {
+            "/api/agents":       lambda: get_agents(vid),
+            "/api/org-chart":    lambda: get_org_chart(vid),
+            "/api/vaults":       lambda: get_vaults(),
+            "/api/settings":     lambda: load_settings(),
+            "/api/vault-config": lambda: get_vault_config(vid),
+            "/api/tasks":        lambda: get_tasks(vid),
+            "/api/inbox":        lambda: get_inbox(vid),
+            "/api/outbox":       lambda: parse_outbox(vid),
+            "/api/sessions":     lambda: get_sessions(vid),
+            "/api/vault-tree":   lambda: build_vault_tree(vid),
+            "/api/status":       lambda: watcher.get_status(),
+            "/api/schedules":    lambda: load_schedules(),
+            "/api/notes":        lambda: get_notes(vid),
+        }
+
+        if path in simple_routes:
+            self.send_json(simple_routes[path]())
+
+        elif path == "/api/agent-read":
+            name = qs.get("name", [""])[0]
+            content, scope = get_agent_content(name, vid)
+            if content:
+                self.send_json({"name": name, "content": content, "scope": scope, "vault": vid})
+            else:
+                self.send_json({"error": "not found"}, 404)
+
+        elif path == "/api/task-read":
+            task_id = re.sub(r"[^A-Z0-9-]", "", qs.get("id", [""])[0].upper())
+            task = get_task(task_id, vid)
+            self.send_json(task if task else {"error": "not found"}, 200 if task else 404)
+
+        elif path == "/api/note-read":
+            rel = qs.get("path", [""])[0]
+            content = get_note(rel, vid)
+            if content is not None:
+                self.send_json({"path": rel, "content": content})
+            else:
+                self.send_json({"error": "not found"}, 404)
+
+        elif path == "/api/vault-raw":
+            rel = qs.get("path", [""])[0]
+            try:
+                f = safe_vault_file_path(rel, vid)
+                ext = f.suffix.lower().lstrip(".")
+                mime = MIME_MAP.get(ext, "application/octet-stream")
+                data = f.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", mime)
+                self.send_header("Content-Length", len(data))
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(data)
+            except (ValueError, FileNotFoundError) as e:
+                self.send_json({"error": str(e)}, 404)
+
+        elif path in ("/", "/index.html"):
+            html = (APP_DIR / "dashboard.html").read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", len(html))
+            self.end_headers()
+            self.wfile.write(html)
+
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        qs = parse_qs(parsed.query)
+        vid = self.vault_id(qs)
+        length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(length)
+        try:
+            data = json.loads(body) if body else {}
+        except json.JSONDecodeError:
+            self.send_json({"ok": False, "error": "invalid JSON"}, 400)
+            return
+
+        try:
+            p = parsed.path
+            if p == "/api/task-create":
+                task_id = create_task(data["title"], data["request"],
+                                      data.get("context", ""), data.get("priority", "Medium"),
+                                      data.get("assigned_to", "Orchestrator"), vid)
+                self.send_json({"ok": True, "id": task_id})
+
+            elif p == "/api/task-answer":
+                self.send_json({"ok": answer_task(data["id"], data["answer"], vid)})
+
+            elif p == "/api/task-status":
+                ok, msg = set_task_status(data["id"], data["status"], vid)
+                self.send_json({"ok": ok, "msg": msg})
+
+            elif p == "/api/task-progress":
+                self.send_json({"ok": append_progress(data["id"], data["entry"], vid)})
+
+            elif p == "/api/agent-save":
+                self.send_json({"ok": save_agent_content(
+                    data["name"], data["content"],
+                    vault_id=data.get("vault") or vid,
+                    scope=data.get("scope", "vault"),
+                )})
+
+            elif p == "/api/outbox-add":
+                oid = add_outbox_entry(data["task_id"], data["agent"],
+                                       data.get("type", "email"), data["to"],
+                                       data["subject"], data["body"], vid)
+                self.send_json({"ok": True, "id": oid})
+
+            elif p == "/api/outbox-discard":
+                self.send_json({"ok": discard_outbox_entry(data["id"], vid)})
+
+            elif p == "/api/vault-file-save":
+                self.send_json({"ok": save_vault_file(data["path"], data["content"], vid)})
+
+            elif p == "/api/settings-save":
+                data.pop("integrations", None)
+                save_settings(data)
+                watcher.force_check()  # pick up new interval immediately
+                self.send_json({"ok": True})
+
+            elif p == "/api/watcher-check":
+                watcher.force_check()
+                self.send_json({"ok": True, **watcher.get_status()})
+
+            elif p == "/api/dispatch":
+                watcher.force_dispatch()
+                self.send_json({"ok": True, "msg": "Dispatch started in background"})
+
+            elif p == "/api/claude":
+                prompt = data.get("prompt", "").strip()
+                if not prompt:
+                    self.send_json({"ok": False, "error": "no prompt"}, 400)
+                    return
+                try:
+                    stdout, stderr, code = run_claude(prompt, timeout=120)
+                    self.send_json({
+                        "ok": code == 0,
+                        "output": stdout,
+                        "stderr": stderr,
+                        "exit_code": code,
+                    })
+                except subprocess.TimeoutExpired:
+                    self.send_json({"ok": False, "output": "", "error": "Timed out (120s)", "exit_code": -1})
+
+            elif p == "/api/vault-config-save":
+                target_id = data.get("id") or vid or load_settings().get("active_vault")
+                save_vault_config(target_id, data)
+                self.send_json({"ok": True})
+
+            elif p == "/api/vault-add":
+                settings = load_settings()
+                new_vault = {"id": data["id"], "name": data["name"],
+                             "description": data.get("description", "")}
+                settings["vaults"].append(new_vault)
+                save_settings(settings)
+                vault_path = VAULTS_DIR / data["id"]
+                for folder in ["tasks", "inbox", "outbox", "sessions"]:
+                    (vault_path / folder).mkdir(parents=True, exist_ok=True)
+                (vault_path / "inbox" / "inbox.md").write_text(
+                    "---\ntype: inbox\n---\n\n# Inbox\n\n| Date | Task | Priority | Status | Agent |\n|------|------|----------|--------|-------|\n")
+                (vault_path / "outbox" / "outbox.md").write_text(
+                    "---\ntype: outbox\n---\n\n# Outbox\n\nDrafts awaiting review.\n")
+                vault_config = {
+                    **new_vault,
+                    "integrations": dict(EMPTY_INTEGRATIONS),
+                    "apps": [],
+                }
+                (vault_path / "vault.json").write_text(json.dumps(vault_config, indent=2))
+                self.send_json({"ok": True})
+
+            elif p == "/api/vault-switch":
+                settings = load_settings()
+                settings["active_vault"] = data["id"]
+                save_settings(settings)
+                self.send_json({"ok": True})
+
+            elif p == "/api/schedule-save":
+                sched_data = load_schedules()
+                schedules = sched_data.get("schedules", [])
+                sched = data.copy()
+                if not sched.get("id"):
+                    sched["id"] = next_schedule_id()
+                existing = next((i for i, s in enumerate(schedules) if s["id"] == sched["id"]), None)
+                if existing is not None:
+                    schedules[existing] = sched
+                else:
+                    schedules.append(sched)
+                sched_data["schedules"] = schedules
+                save_schedules(sched_data)
+                self.send_json({"ok": True, "id": sched["id"]})
+
+            elif p == "/api/schedule-delete":
+                sched_data = load_schedules()
+                sched_data["schedules"] = [s for s in sched_data.get("schedules", []) if s["id"] != data["id"]]
+                save_schedules(sched_data)
+                self.send_json({"ok": True})
+
+            elif p == "/api/schedule-toggle":
+                sched_data = load_schedules()
+                for s in sched_data.get("schedules", []):
+                    if s["id"] == data["id"]:
+                        s["enabled"] = not s.get("enabled", True)
+                        break
+                save_schedules(sched_data)
+                self.send_json({"ok": True})
+
+            elif p == "/api/schedule-run":
+                sched_data = load_schedules()
+                sched = next((s for s in sched_data.get("schedules", []) if s["id"] == data["id"]), None)
+                if sched:
+                    threading.Thread(target=scheduler._fire, args=(sched,), daemon=True).start()
+                    self.send_json({"ok": True})
+                else:
+                    self.send_json({"ok": False, "error": "not found"}, 404)
+
+            elif p == "/api/terminal":
+                cmd = data.get("cmd", "").strip()
+                if not cmd:
+                    self.send_json({"stdout": "", "stderr": "", "exit_code": 0, "cwd": str(ROOT)})
+                    return
+                try:
+                    result = subprocess.run(
+                        cmd, shell=True, cwd=str(ROOT),
+                        capture_output=True, text=True, timeout=30
+                    )
+                    self.send_json({
+                        "stdout": result.stdout,
+                        "stderr": result.stderr,
+                        "exit_code": result.returncode,
+                        "cwd": str(ROOT),
+                    })
+                except subprocess.TimeoutExpired:
+                    self.send_json({"stdout": "", "stderr": "Command timed out (30s limit)", "exit_code": 124, "cwd": str(ROOT)})
+
+            else:
+                self.send_response(404)
+                self.end_headers()
+
+        except KeyError as e:
+            self.send_json({"ok": False, "error": f"missing field: {e}"}, 400)
+        except Exception as e:
+            self.send_json({"ok": False, "error": str(e)}, 500)
+
+
+class _ReuseServer(HTTPServer):
+    allow_reuse_address = True
+
+    def server_bind(self):
+        import socket as _socket
+        self.socket.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEPORT, 1)
+        super().server_bind()
+
+
+if __name__ == "__main__":
+    port = get_port()
+    server = _ReuseServer(("localhost", port), Handler)
+    print(f"Console → http://localhost:{port}")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nStopped.")

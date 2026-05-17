@@ -1,0 +1,14 @@
+{
+  "schedules": [
+    {
+      "id": "SCH-001",
+      "name": "Daily Brief",
+      "prompt": "Act as Orchestrator. Create and complete a daily brief for the personal vault. The brief must include: (1) a simple maths problem with its solution, and (2) today's top Australian news headlines (fetch from a public news source). Then act as BookWorm and file the completed output as a note at vaults/personal/notes/Daily Briefs/YYYY-MM-DD - Daily Brief.md using the standard portable note format with YAML frontmatter (date, type: daily-brief, source: scheduled, tags: [daily-brief, news, australia]).",
+      "schedule": "daily",
+      "time": "08:00",
+      "vault": "personal",
+      "enabled": true,
+      "last_run": "2026-05-17"
+    }
+  ]
+}

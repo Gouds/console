@@ -1,0 +1,1943 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Console</title>
+<style>
+/* ── Reset & base ─────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg:       #0e0e0c;
+  --surface:  #151513;
+  --border:   #2a2a26;
+  --accent:   #FFE600;
+  --accent2:  #a3e635;
+  --text:     #e8e8e0;
+  --muted:    #6b6b60;
+  --danger:   #ef4444;
+  --warn:     #f59e0b;
+  --done:     #22c55e;
+  --mono:     'JetBrains Mono', 'Fira Mono', monospace;
+  --sans:     'Space Grotesk', 'Inter', sans-serif;
+}
+html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px; overflow: hidden; }
+body::before {
+  content: "";
+  position: fixed; inset: 0; pointer-events: none; z-index: 9999;
+  background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,.04) 2px, rgba(0,0,0,.04) 4px);
+}
+
+/* ── Layout ───────────────────────────────────────────────── */
+#app { display: flex; flex-direction: column; height: 100vh; }
+#topbar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 0 20px; height: 48px; min-height: 48px;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  position: relative; z-index: 10;
+}
+#topbar .logo { font-family: var(--mono); font-size: 15px; font-weight: 700; color: var(--accent); letter-spacing: 2px; margin-right: 8px; }
+#topbar .logo span { color: var(--muted); font-weight: 400; }
+#nav { display: flex; gap: 2px; flex: 1; }
+.nav-tab {
+  padding: 6px 14px; border-radius: 4px; cursor: pointer;
+  font-size: 12px; font-weight: 500; color: var(--muted);
+  border: 1px solid transparent; transition: all .15s; user-select: none;
+  white-space: nowrap;
+}
+.nav-tab:hover { color: var(--text); border-color: var(--border); }
+.nav-tab.active { color: var(--accent); border-color: var(--accent); background: rgba(255,230,0,.06); }
+.badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--danger); color: #fff; border-radius: 8px;
+  font-size: 10px; font-weight: 700; min-width: 16px; height: 16px;
+  padding: 0 4px; margin-left: 5px; line-height: 1;
+}
+.badge.warn { background: var(--warn); color: #000; }
+.badge.hidden { display: none; }
+#vault-switcher {
+  margin-left: auto;
+  display: flex; align-items: center; gap: 8px;
+}
+#vault-switcher label { font-size: 11px; color: var(--muted); }
+#vault-select {
+  background: var(--bg); color: var(--text); border: 1px solid var(--border);
+  border-radius: 4px; padding: 4px 8px; font-size: 12px; cursor: pointer;
+  font-family: var(--sans);
+}
+#vault-select:focus { outline: none; border-color: var(--accent); }
+.dot { width: 6px; height: 6px; border-radius: 50%; background: var(--done); display: inline-block; }
+
+#content { flex: 1; overflow: auto; padding: 28px; }
+
+/* ── Views ────────────────────────────────────────────────── */
+.view { display: none; }
+.view.active { display: block; }
+#view-files.active     { display: flex; margin: -28px; height: calc(100vh - 48px); }
+#view-terminal.active  { display: flex; flex-direction: column; margin: -28px; height: calc(100vh - 48px); }
+#view-chat.active      { display: flex; flex-direction: column; margin: -28px; height: calc(100vh - 48px); }
+#view-org.active       { display: flex; justify-content: center; }
+
+/* ── Cards & panels ───────────────────────────────────────── */
+.panel {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+  padding: 20px; margin-bottom: 20px;
+}
+.panel-title { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 16px; }
+
+/* ── Kanban ───────────────────────────────────────────────── */
+#kanban-board { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+.kanban-col { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 14px; min-height: 200px; }
+.col-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
+.col-count { background: var(--border); color: var(--text); border-radius: 10px; padding: 1px 7px; font-size: 10px; }
+.kanban-card {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 5px;
+  padding: 10px 12px; margin-bottom: 8px; cursor: pointer;
+  transition: border-color .15s, transform .1s;
+}
+.kanban-card:hover { border-color: var(--accent); transform: translateY(-1px); }
+.kanban-card-id { font-family: var(--mono); font-size: 10px; color: var(--muted); margin-bottom: 4px; }
+.kanban-card-title { font-size: 13px; font-weight: 500; margin-bottom: 6px; }
+.kanban-card-meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.kanban-card-output { font-size: 11px; color: var(--muted); margin-top: 6px; line-height: 1.4; font-style: italic; }
+.pill {
+  display: inline-block; font-size: 10px; font-weight: 600;
+  padding: 2px 7px; border-radius: 10px; border: 1px solid;
+}
+.pill.high   { color: var(--danger); border-color: var(--danger); }
+.pill.medium { color: var(--warn);   border-color: var(--warn); }
+.pill.low    { color: var(--done);   border-color: var(--done); }
+.pill.agent  { color: var(--accent); border-color: var(--accent); background: rgba(255,230,0,.06); }
+.waiting-q { font-size: 11px; color: var(--warn); margin-top: 6px; line-height: 1.4; }
+
+/* ── Task modal ───────────────────────────────────────────── */
+#task-modal-backdrop {
+  display: none; position: fixed; inset: 0; z-index: 100;
+  background: rgba(0,0,0,.7); align-items: center; justify-content: center;
+}
+#task-modal-backdrop.open { display: flex; }
+#task-modal {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  width: 860px; max-width: 95vw; height: 78vh; display: flex; flex-direction: column;
+  box-shadow: 0 24px 80px rgba(0,0,0,.6);
+}
+#task-modal-header {
+  padding: 16px 20px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+  flex-shrink: 0;
+}
+#task-modal-header h2 { font-size: 15px; font-weight: 600; }
+#task-modal-header .modal-meta { display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+#task-modal-close { background: none; border: none; color: var(--muted); font-size: 20px; cursor: pointer; line-height: 1; padding: 0 4px; }
+#task-modal-close:hover { color: var(--text); }
+#task-modal-body { flex: 1; overflow: hidden; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
+.task-modal-pane { padding: 20px; overflow-y: auto; }
+.task-modal-pane + .task-modal-pane { border-left: 1px solid var(--border); }
+.task-modal-pane h4 { font-size: 10px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; }
+.task-text { font-size: 13px; line-height: 1.7; color: var(--text); white-space: pre-wrap; }
+.task-text h1,.task-text h2,.task-text h3 { font-size: 14px; font-weight: 600; margin: 14px 0 6px; color: var(--accent); }
+.task-text strong { color: var(--text); font-weight: 600; }
+.task-text em { color: var(--muted); }
+.task-text code { font-family: var(--mono); background: var(--bg); padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+.task-text ul,.task-text ol { padding-left: 20px; }
+.task-text li { margin-bottom: 4px; }
+.task-text blockquote { border-left: 3px solid var(--accent); padding-left: 12px; color: var(--muted); }
+.task-text table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.task-text th { background: var(--bg); padding: 6px 10px; text-align: left; border: 1px solid var(--border); }
+.task-text td { padding: 6px 10px; border: 1px solid var(--border); }
+#task-modal-footer {
+  padding: 14px 20px; border-top: 1px solid var(--border);
+  display: flex; gap: 10px; align-items: center; flex-shrink: 0; flex-wrap: wrap;
+}
+#answer-area { display: none; flex: 1; gap: 8px; }
+#answer-area textarea {
+  flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+  color: var(--text); padding: 8px 10px; font-family: var(--sans); font-size: 13px; resize: none; height: 60px;
+}
+#answer-area textarea:focus { outline: none; border-color: var(--accent); }
+
+/* ── New task ─────────────────────────────────────────────── */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 14px; border-radius: 4px; font-size: 12px; font-weight: 600;
+  cursor: pointer; border: 1px solid; transition: all .15s; font-family: var(--sans);
+}
+.btn-primary { background: var(--accent); color: #000; border-color: var(--accent); }
+.btn-primary:hover { background: #ffe933; }
+.btn-ghost   { background: transparent; color: var(--text); border-color: var(--border); }
+.btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+.btn-danger  { background: transparent; color: var(--danger); border-color: var(--danger); }
+.btn-danger:hover { background: var(--danger); color: #fff; }
+.btn-sm      { padding: 4px 10px; font-size: 11px; }
+
+#new-task-form {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+  padding: 20px; margin-bottom: 20px; display: none;
+}
+#new-task-form.open { display: block; }
+#new-task-form h3 { font-size: 13px; font-weight: 600; margin-bottom: 14px; }
+.form-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+.form-group { display: flex; flex-direction: column; gap: 5px; }
+.form-group label { font-size: 11px; color: var(--muted); font-weight: 500; }
+.form-group input, .form-group select, .form-group textarea {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+  color: var(--text); padding: 7px 10px; font-family: var(--sans); font-size: 13px;
+}
+.form-group input:focus, .form-group select:focus, .form-group textarea:focus { outline: none; border-color: var(--accent); }
+.form-group textarea { resize: vertical; min-height: 80px; }
+.form-group select option { background: var(--surface); }
+.form-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+/* ── Outbox ───────────────────────────────────────────────── */
+.outbox-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+  margin-bottom: 14px; overflow: hidden;
+}
+.outbox-card-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; border-bottom: 1px solid var(--border); flex-wrap: wrap; gap: 8px;
+}
+.outbox-meta { font-size: 11px; color: var(--muted); }
+.outbox-meta strong { color: var(--text); }
+.outbox-subject { font-size: 13px; font-weight: 600; margin-top: 2px; }
+.outbox-card-actions { display: flex; gap: 8px; }
+.outbox-body {
+  padding: 16px; font-size: 13px; line-height: 1.7;
+  font-family: var(--mono); white-space: pre-wrap; color: var(--text);
+  border-bottom: 1px solid var(--border); max-height: 340px; overflow-y: auto;
+}
+.outbox-empty { color: var(--muted); text-align: center; padding: 60px 0; font-size: 13px; }
+
+/* ── Agents tab ───────────────────────────────────────────── */
+.agent-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+.agent-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+  padding: 16px; cursor: pointer; transition: border-color .15s;
+}
+.agent-card:hover { border-color: var(--accent); }
+.agent-emoji { font-size: 28px; margin-bottom: 8px; }
+.agent-name { font-size: 14px; font-weight: 700; }
+.agent-role { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.agent-tagline { font-size: 11px; color: var(--muted); font-style: italic; margin-top: 8px; line-height: 1.4; }
+.agent-status { font-size: 10px; font-weight: 600; color: var(--done); margin-top: 8px; }
+
+/* ── Agent modal ──────────────────────────────────────────── */
+#agent-modal-backdrop {
+  display: none; position: fixed; inset: 0; z-index: 100;
+  background: rgba(0,0,0,.7); align-items: center; justify-content: center;
+}
+#agent-modal-backdrop.open { display: flex; }
+#agent-modal {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  width: 720px; max-width: 94vw; height: 80vh; display: flex; flex-direction: column;
+  box-shadow: 0 24px 80px rgba(0,0,0,.6);
+}
+#agent-modal-header {
+  padding: 14px 20px; border-bottom: 1px solid var(--border);
+  display: flex; justify-content: space-between; align-items: center; flex-shrink: 0;
+}
+#agent-modal-body { flex: 1; overflow: hidden; min-height: 0; display: flex; flex-direction: column; }
+#agent-editor { flex: 1; min-height: 0; }
+#agent-editor textarea {
+  width: 100%; height: 100%; background: var(--bg);
+  border: none; border-radius: 0; color: var(--text);
+  padding: 20px; font-family: var(--mono); font-size: 13px; line-height: 1.6;
+  resize: none; box-sizing: border-box;
+}
+#agent-editor textarea:focus { outline: none; }
+#agent-modal-footer {
+  padding: 12px 20px; border-top: 1px solid var(--border);
+  display: flex; gap: 10px; justify-content: flex-end; flex-shrink: 0;
+}
+
+/* ── Org chart ────────────────────────────────────────────── */
+.org-wrap { padding: 40px; overflow: auto; width: 100%; }
+.org-node {
+  display: inline-flex; flex-direction: column; align-items: center;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+  padding: 12px 16px; min-width: 120px; text-align: center;
+}
+.org-node.root { border-color: var(--accent); }
+.org-node .org-emoji { font-size: 22px; margin-bottom: 4px; }
+.org-node .org-name { font-size: 12px; font-weight: 700; }
+.org-node .org-role { font-size: 10px; color: var(--muted); margin-top: 2px; }
+.org-level { display: flex; gap: 24px; justify-content: center; margin-top: 32px; position: relative; }
+.org-level::before {
+  content: ""; position: absolute; top: -16px; left: 10%; right: 10%;
+  height: 1px; background: var(--border);
+}
+.org-col { display: flex; flex-direction: column; align-items: center; }
+.org-col-line { width: 1px; height: 16px; background: var(--border); }
+
+/* ── File browser ─────────────────────────────────────────── */
+#file-tree {
+  width: 240px; min-width: 200px; border-right: 1px solid var(--border);
+  overflow-y: auto; background: var(--surface); padding: 12px 0; flex-shrink: 0;
+}
+#file-viewer { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+#fv-toolbar {
+  display: flex; align-items: center; gap: 8px; padding: 10px 16px;
+  border-bottom: 1px solid var(--border); background: var(--surface); flex-shrink: 0;
+}
+#fv-path { font-family: var(--mono); font-size: 11px; color: var(--muted); flex: 1; }
+#fv-content { flex: 1; overflow: auto; padding: 0; }
+.fv-placeholder { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--muted); font-size: 13px; }
+.fv-md   { padding: 28px 32px; max-width: 780px; line-height: 1.75; font-size: 14px; }
+.fv-code { padding: 20px; font-family: var(--mono); font-size: 12px; line-height: 1.6; white-space: pre; color: var(--text); }
+.fv-editor { display: flex; flex-direction: column; height: 100%; }
+.fv-editor textarea {
+  flex: 1; background: var(--bg); border: none; color: var(--text);
+  padding: 20px; font-family: var(--mono); font-size: 13px; line-height: 1.6; resize: none;
+}
+.fv-editor textarea:focus { outline: none; }
+.fv-editor-bar {
+  display: flex; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+.tree-item {
+  display: flex; align-items: center; gap: 6px; padding: 4px 12px;
+  font-size: 12px; cursor: pointer; user-select: none; white-space: nowrap;
+  color: var(--muted);
+}
+.tree-item:hover { background: rgba(255,255,255,.04); color: var(--text); }
+.tree-item.selected { color: var(--accent); background: rgba(255,230,0,.06); }
+.tree-item.dir { color: var(--text); font-weight: 500; }
+.tree-item .tree-icon { width: 14px; flex-shrink: 0; }
+.tree-indent { padding-left: 14px; }
+
+/* ── Schedules tab ────────────────────────────────────────── */
+.sched-list { display: flex; flex-direction: column; gap: 12px; }
+.sched-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+  padding: 16px 20px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+}
+.sched-card.disabled { opacity: .5; }
+.sched-info { flex: 1; min-width: 0; }
+.sched-name { font-size: 14px; font-weight: 600; }
+.sched-detail { font-size: 11px; color: var(--muted); margin-top: 3px; }
+.sched-prompt { font-size: 11px; color: var(--muted); margin-top: 6px; font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 500px; }
+.sched-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.toggle-switch { position: relative; display: inline-block; width: 36px; height: 20px; cursor: pointer; }
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+.toggle-slider { position: absolute; inset: 0; background: var(--border); border-radius: 20px; transition: .2s; }
+.toggle-slider::before { content: ''; position: absolute; width: 14px; height: 14px; left: 3px; bottom: 3px; background: var(--muted); border-radius: 50%; transition: .2s; }
+.toggle-switch input:checked + .toggle-slider { background: var(--accent); }
+.toggle-switch input:checked + .toggle-slider::before { transform: translateX(16px); background: #000; }
+#sched-form-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 20px; margin-bottom: 20px; display: none; }
+#sched-form-wrap.open { display: block; }
+#sched-form-wrap h3 { font-size: 13px; font-weight: 600; margin-bottom: 14px; }
+
+/* ── Notes tab ────────────────────────────────────────────── */
+#view-notes.active { display: flex; gap: 0; margin: -28px; height: calc(100vh - 48px); }
+#notes-sidebar {
+  width: 260px; min-width: 220px; border-right: 1px solid var(--border);
+  background: var(--surface); overflow-y: auto; padding: 16px 0; flex-shrink: 0;
+}
+#notes-sidebar .ns-cat { font-size: 10px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; padding: 8px 16px 4px; }
+.note-item {
+  padding: 8px 16px; cursor: pointer; font-size: 12px; color: var(--muted); border-left: 2px solid transparent;
+  transition: all .12s; line-height: 1.4;
+}
+.note-item:hover { color: var(--text); background: rgba(255,255,255,.03); }
+.note-item.selected { color: var(--accent); border-left-color: var(--accent); background: rgba(255,230,0,.05); }
+.note-item-title { font-weight: 500; color: inherit; }
+.note-item-meta { font-size: 10px; color: var(--muted); margin-top: 1px; }
+#notes-viewer { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+#nv-toolbar {
+  display: flex; align-items: center; gap: 8px; padding: 10px 16px;
+  border-bottom: 1px solid var(--border); background: var(--surface); flex-shrink: 0;
+}
+#nv-path { font-family: var(--mono); font-size: 11px; color: var(--muted); flex: 1; }
+#nv-content { flex: 1; overflow-y: auto; }
+.nv-md { padding: 28px 36px; max-width: 800px; line-height: 1.8; font-size: 14px; }
+.nv-empty { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--muted); font-size: 13px; }
+#notes-search { width: 100%; padding: 8px 16px; background: var(--bg); border: none; border-bottom: 1px solid var(--border); color: var(--text); font-size: 12px; font-family: var(--sans); outline: none; }
+#notes-search::placeholder { color: var(--muted); }
+
+/* ── Settings tab ─────────────────────────────────────────── */
+.settings-section { max-width: 600px; margin-bottom: 28px; }
+.settings-section h3 { font-size: 13px; font-weight: 600; margin-bottom: 14px; color: var(--accent); }
+.settings-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+
+/* ── Terminal ─────────────────────────────────────────────── */
+#terminal-wrap { display: flex; flex: 1; min-height: 0; }
+#terminal-main { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+#terminal-output {
+  flex: 1; overflow-y: auto; padding: 20px 24px;
+  font-family: var(--mono); font-size: 13px; line-height: 1.7;
+  background: #080807;
+}
+.term-line { white-space: pre-wrap; word-break: break-all; }
+.term-prompt-line { display: flex; gap: 8px; margin-top: 10px; }
+.term-prompt-line:first-child { margin-top: 0; }
+.term-ps1 { color: var(--accent); flex-shrink: 0; }
+.term-cmd  { color: var(--text); }
+.term-out  { color: #9ca3af; }
+.term-err  { color: var(--danger); }
+.term-exit { color: var(--danger); font-size: 11px; opacity: .7; }
+#terminal-input-row {
+  display: flex; align-items: center;
+  padding: 12px 24px; border-top: 1px solid var(--border);
+  background: var(--surface); flex-shrink: 0;
+}
+#term-ps1-label { font-family: var(--mono); font-size: 13px; color: var(--accent); margin-right: 8px; white-space: nowrap; }
+#term-input {
+  flex: 1; background: transparent; border: none; outline: none;
+  color: var(--text); font-family: var(--mono); font-size: 13px;
+  caret-color: var(--accent);
+}
+#terminal-sidebar {
+  width: 200px; border-left: 1px solid var(--border);
+  background: var(--surface); padding: 16px; flex-shrink: 0;
+  display: flex; flex-direction: column; gap: 6px;
+}
+#terminal-sidebar .sidebar-title { font-size: 10px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+.term-quick-btn {
+  display: block; width: 100%; text-align: left;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+  color: var(--text); font-family: var(--mono); font-size: 11px;
+  padding: 6px 10px; cursor: pointer; transition: border-color .15s;
+}
+.term-quick-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ── Chat (coming soon) ───────────────────────────────────── */
+#chat-coming-soon {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 20px;
+  background: #080807;
+}
+.cs-badge {
+  font-family: var(--mono); font-size: 10px; font-weight: 700;
+  letter-spacing: 3px; color: var(--muted);
+  border: 1px solid var(--border); border-radius: 20px;
+  padding: 4px 14px; text-transform: uppercase;
+}
+.cs-icon { font-size: 48px; opacity: .25; }
+.cs-title { font-size: 22px; font-weight: 700; color: var(--text); }
+.cs-sub   { font-size: 13px; color: var(--muted); text-align: center; max-width: 400px; line-height: 1.6; }
+.cs-features {
+  display: flex; gap: 12px; flex-wrap: wrap; justify-content: center;
+  margin-top: 8px;
+}
+.cs-feature {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+  padding: 10px 16px; font-size: 12px; color: var(--muted); text-align: center;
+}
+.cs-feature strong { display: block; color: var(--text); margin-bottom: 2px; font-size: 13px; }
+#chat-input-placeholder {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; max-width: 560px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  padding: 12px 16px; opacity: .4; pointer-events: none;
+}
+#chat-input-placeholder input {
+  flex: 1; background: transparent; border: none; outline: none;
+  color: var(--muted); font-family: var(--sans); font-size: 13px;
+}
+#chat-input-placeholder .send-btn {
+  background: var(--accent); color: #000; border: none; border-radius: 4px;
+  padding: 6px 14px; font-size: 12px; font-weight: 700; cursor: not-allowed;
+}
+.vault-card {
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 6px; margin-bottom: 12px; overflow: hidden;
+}
+.vault-card.active-vault { border-color: var(--accent); }
+.vault-card-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 14px;
+}
+.vault-row-name { font-size: 13px; font-weight: 600; }
+.vault-row-id   { font-size: 11px; color: var(--muted); font-family: var(--mono); margin-top: 1px; }
+.vault-row-actions { display: flex; gap: 8px; align-items: center; }
+.vault-integrations {
+  border-top: 1px solid var(--border); padding: 14px;
+  display: none;
+}
+.vault-integrations.open { display: block; }
+.vault-integrations h4 { font-size: 10px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
+.integration-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.integration-label { font-size: 12px; color: var(--muted); width: 64px; flex-shrink: 0; }
+.integration-pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; font-weight: 600; padding: 2px 9px;
+  border-radius: 10px; border: 1px solid var(--border); color: var(--muted);
+}
+.integration-pill.configured { color: var(--done); border-color: var(--done); }
+.integration-pill.coming-soon { opacity: .4; }
+.provider-select {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 4px;
+  color: var(--text); padding: 5px 8px; font-size: 12px; font-family: var(--sans);
+}
+.provider-select:focus { outline: none; border-color: var(--accent); }
+.integration-address {
+  flex: 1; min-width: 160px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 4px;
+  color: var(--text); padding: 5px 8px; font-size: 12px; font-family: var(--sans);
+}
+.integration-address:focus { outline: none; border-color: var(--accent); }
+</style>
+</head>
+<body>
+<div id="app">
+  <!-- Topbar -->
+  <div id="topbar">
+    <div class="logo">CONSOLE<span>.sys</span></div>
+    <nav id="nav">
+      <div class="nav-tab active" data-view="tasks">Tasks <span class="badge hidden" id="pending-badge"></span></div>
+      <div class="nav-tab" data-view="outbox">Outbox <span class="badge hidden" id="outbox-badge"></span></div>
+      <div class="nav-tab" data-view="agents">Agents</div>
+      <div class="nav-tab" data-view="org">Org</div>
+      <div class="nav-tab" data-view="files">Files</div>
+      <div class="nav-tab" data-view="terminal">Terminal</div>
+      <div class="nav-tab" data-view="schedules">Schedules</div>
+      <div class="nav-tab" data-view="notes">Notes</div>
+      <div class="nav-tab" data-view="chat">Chat</div>
+      <div class="nav-tab" data-view="settings">Settings</div>
+    </nav>
+    <div id="vault-switcher">
+      <label>Vault</label>
+      <select id="vault-select" onchange="switchVault(this.value)">
+        <option value="">loading…</option>
+      </select>
+      <span class="dot" title="Online"></span>
+    </div>
+  </div>
+
+  <!-- Main content -->
+  <div id="content">
+
+    <!-- ── Tasks view ── -->
+    <div id="view-tasks" class="view active">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+        <div>
+          <div style="font-size:18px; font-weight:700;">Task Board</div>
+          <div id="tasks-vault-label" style="font-size:11px; color:var(--muted); margin-top:2px;"></div>
+        </div>
+        <button class="btn btn-primary" onclick="toggleNewTask()">+ New Task</button>
+      </div>
+      <div id="dispatch-alert" style="display:none;background:rgba(245,158,11,.08);border:1px solid var(--warn);border-radius:6px;padding:12px 16px;margin-bottom:16px;display:none;align-items:center;justify-content:space-between;gap:12px;">
+        <div>
+          <span style="color:var(--warn);font-weight:600;font-size:13px;">⚡ Tasks pending</span>
+          <span id="dispatch-alert-msg" style="color:var(--muted);font-size:12px;margin-left:8px;"></span>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button class="btn btn-primary btn-sm" onclick="triggerDispatch()">Run Dispatch</button>
+          <button class="btn btn-ghost btn-sm" onclick="runDispatchInTerminal()">In Terminal</button>
+          <button class="btn btn-ghost btn-sm" style="color:var(--muted);font-size:18px;padding:0 6px;border:none;" onclick="dismissDispatchAlert()">✕</button>
+        </div>
+      </div>
+
+      <div id="new-task-form">
+        <h3>New Task</h3>
+        <div class="form-row">
+          <div class="form-group" style="grid-column:1/-1">
+            <label>Title</label>
+            <input type="text" id="nt-title" placeholder="Short description of the task">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group" style="grid-column:1/-1">
+            <label>Request</label>
+            <textarea id="nt-request" placeholder="What needs to be done? Be specific."></textarea>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group" style="grid-column:1 / span 2">
+            <label>Context (optional)</label>
+            <textarea id="nt-context" placeholder="Background information, links, constraints…" style="min-height:60px;"></textarea>
+          </div>
+          <div class="form-group">
+            <label>Priority</label>
+            <select id="nt-priority">
+              <option value="High">High</option>
+              <option value="Medium" selected>Medium</option>
+              <option value="Low">Low</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Assign to</label>
+            <select id="nt-agent"><option value="Orchestrator">Orchestrator</option></select>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-ghost" onclick="toggleNewTask()">Cancel</button>
+          <button class="btn btn-primary" onclick="submitNewTask()">Create Task</button>
+        </div>
+      </div>
+      <div id="kanban-board"></div>
+    </div>
+
+    <!-- ── Outbox view ── -->
+    <div id="view-outbox" class="view">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+        <div>
+          <div style="font-size:18px; font-weight:700;">Outbox</div>
+          <div style="font-size:11px; color:var(--muted); margin-top:2px;">Drafts awaiting your review before sending</div>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="loadAll()">↻ Refresh</button>
+      </div>
+      <div id="outbox-list"></div>
+    </div>
+
+    <!-- ── Agents view ── -->
+    <div id="view-agents" class="view">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+        <div style="font-size:18px; font-weight:700;">Agent Team</div>
+      </div>
+      <div id="agent-grid" class="agent-grid"></div>
+    </div>
+
+    <!-- ── Org view ── -->
+    <div id="view-org" class="view">
+      <div class="org-wrap" id="org-chart"></div>
+    </div>
+
+    <!-- ── Files view ── -->
+    <div id="view-files" class="view">
+      <div id="file-tree"></div>
+      <div id="file-viewer">
+        <div id="fv-toolbar">
+          <span id="fv-path">Select a file</span>
+          <button class="btn btn-ghost btn-sm" id="fv-raw-btn" onclick="toggleFvRaw()" style="display:none;">Raw</button>
+          <button class="btn btn-ghost btn-sm" id="fv-edit-btn" onclick="editVaultFile()" style="display:none;">Edit</button>
+        </div>
+        <div id="fv-content"><div class="fv-placeholder">← Select a file to view it</div></div>
+      </div>
+    </div>
+
+    <!-- ── Terminal view ── -->
+    <div id="view-terminal" class="view">
+      <div id="terminal-wrap">
+        <div id="terminal-main">
+          <div id="terminal-output"></div>
+          <div id="terminal-input-row">
+            <span id="term-ps1-label">agent ›</span>
+            <input id="term-input" type="text" autocomplete="off" spellcheck="false" placeholder="ask anything, /dispatch, or !shell-cmd">
+          </div>
+        </div>
+        <div id="terminal-sidebar">
+          <div style="display:flex;gap:4px;margin-bottom:12px;">
+            <button id="mode-agent-btn" class="term-quick-btn" style="flex:1;text-align:center;border-color:var(--accent);color:var(--accent);" onclick="setTermMode('agent')">Agent</button>
+            <button id="mode-shell-btn" class="term-quick-btn" style="flex:1;text-align:center;" onclick="setTermMode('shell')">Shell</button>
+          </div>
+          <div class="sidebar-title">Quick</div>
+          <button class="term-quick-btn" onclick="termRun('/dispatch')">⚡ dispatch</button>
+          <button class="term-quick-btn" onclick="termRun('what tasks are pending?')">pending tasks</button>
+          <button class="term-quick-btn" onclick="termRun('!python console.py status')">!status</button>
+          <button class="term-quick-btn" onclick="termRun('!ls vaults/personal/tasks/')">!list tasks</button>
+          <button class="term-quick-btn" onclick="termRun('!ls agents/')">!list agents</button>
+          <div class="sidebar-title" style="margin-top:14px;">History</div>
+          <div id="term-history-list" style="font-size:11px;color:var(--muted);font-family:var(--mono);"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Chat view ── -->
+    <div id="view-chat" class="view">
+      <div id="chat-coming-soon">
+        <div class="cs-badge">Coming Soon</div>
+        <div class="cs-icon">💬</div>
+        <div class="cs-title">Agent Chat</div>
+        <div class="cs-sub">Talk directly to your agent team. The Orchestrator routes your message, adopts the right agent persona, and responds inline — all without leaving the dashboard.</div>
+        <div class="cs-features">
+          <div class="cs-feature"><strong>Task creation</strong>Ask an agent to queue a task</div>
+          <div class="cs-feature"><strong>Live research</strong>Scout answers inline</div>
+          <div class="cs-feature"><strong>Draft review</strong>Herald reads and revises</div>
+          <div class="cs-feature"><strong>Dispatch trigger</strong>Run the queue by asking</div>
+        </div>
+        <div id="chat-input-placeholder">
+          <input type="text" placeholder="Ask your agent team anything…" disabled>
+          <button class="send-btn">Send</button>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px;">Requires an Anthropic API key — configure it in Settings when ready.</div>
+      </div>
+    </div>
+
+    <!-- ── Schedules view ── -->
+    <div id="view-schedules" class="view">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+        <div>
+          <div style="font-size:18px; font-weight:700;">Schedules</div>
+          <div style="font-size:11px; color:var(--muted); margin-top:2px;">Automated tasks fired on a schedule</div>
+        </div>
+        <button class="btn btn-primary" onclick="toggleSchedForm()">+ New Schedule</button>
+      </div>
+
+      <div id="sched-form-wrap">
+        <h3>New Schedule</h3>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Name</label>
+            <input type="text" id="sf-name" placeholder="e.g. Daily Brief">
+          </div>
+          <div class="form-group">
+            <label>Frequency</label>
+            <select id="sf-freq">
+              <option value="daily">Daily</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Time (24h)</label>
+            <input type="time" id="sf-time" value="08:00">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group" style="grid-column:1/-1">
+            <label>Prompt (what to do)</label>
+            <textarea id="sf-prompt" placeholder="Describe the task Claude should perform…" style="min-height:80px;"></textarea>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Vault</label>
+            <select id="sf-vault"><option value="personal">personal</option></select>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-ghost" onclick="toggleSchedForm()">Cancel</button>
+          <button class="btn btn-primary" onclick="saveSchedule()">Save Schedule</button>
+        </div>
+      </div>
+
+      <div id="sched-list" class="sched-list"></div>
+    </div>
+
+    <!-- ── Notes view ── -->
+    <div id="view-notes" class="view">
+      <div id="notes-sidebar">
+        <input id="notes-search" type="text" placeholder="Search notes…" oninput="filterNotes(this.value)">
+        <div id="notes-tree"></div>
+      </div>
+      <div id="notes-viewer">
+        <div id="nv-toolbar">
+          <span id="nv-path" style="color:var(--muted);">Select a note</span>
+          <button class="btn btn-ghost btn-sm" onclick="loadNotes()">↻</button>
+        </div>
+        <div id="nv-content"><div class="nv-empty">← Select a note to read it</div></div>
+      </div>
+    </div>
+
+    <!-- ── Settings view ── -->
+    <div id="view-settings" class="view">
+      <div style="font-size:18px; font-weight:700; margin-bottom:24px;">Settings</div>
+
+      <div class="settings-section">
+        <h3>Console</h3>
+        <div class="settings-row">
+          <div class="form-group"><label>Console name</label><input type="text" id="s-console-name"></div>
+          <div class="form-group"><label>Port</label><input type="number" id="s-port" min="1024" max="65535"></div>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h3>User</h3>
+        <div class="settings-row">
+          <div class="form-group"><label>Name</label><input type="text" id="s-user-name"></div>
+          <div class="form-group"><label>Email</label><input type="email" id="s-user-email"></div>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h3>Dispatch</h3>
+        <div class="settings-row" style="grid-template-columns: 1fr 1fr;">
+          <div class="form-group">
+            <label>Task poll interval</label>
+            <select id="s-poll-interval">
+              <option value="0">Off</option>
+              <option value="30">30 seconds</option>
+              <option value="60">1 minute</option>
+              <option value="300">5 minutes</option>
+              <option value="900">15 minutes</option>
+              <option value="3600">1 hour</option>
+            </select>
+            <span style="font-size:11px;color:var(--muted);margin-top:4px;">How often Console checks for pending tasks across all vaults.</span>
+          </div>
+          <div class="form-group">
+            <label>Auto-dispatch</label>
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:4px;">
+              <input type="checkbox" id="s-auto-dispatch" style="accent-color:var(--accent);width:16px;height:16px;">
+              <span style="font-size:13px;">Automatically run dispatch when pending tasks are detected</span>
+            </label>
+            <span style="font-size:11px;color:var(--muted);margin-top:4px;">Uses <code style="font-size:11px;">claude --print</code> in the background. Requires poll interval to be set.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h3>Vaults &amp; Integrations</h3>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:16px;">Each vault has its own integrations — configure email, calendar and apps per context.</p>
+        <div id="vault-list"></div>
+        <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
+          <input type="text" id="new-vault-id" placeholder="vault-id" style="background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:6px 10px;font-size:12px;width:120px;font-family:var(--mono);">
+          <input type="text" id="new-vault-name" placeholder="Display name" style="background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:6px 10px;font-size:12px;width:140px;">
+          <button class="btn btn-ghost btn-sm" onclick="addVault()">+ Add Vault</button>
+        </div>
+      </div>
+
+      <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
+      <span id="settings-saved" style="display:none;margin-left:12px;font-size:12px;color:var(--done);">Saved ✓</span>
+    </div>
+
+  </div><!-- #content -->
+</div><!-- #app -->
+
+<!-- ── Task modal ── -->
+<div id="task-modal-backdrop" onclick="closeTaskModal(event)">
+  <div id="task-modal">
+    <div id="task-modal-header">
+      <div>
+        <div id="modal-task-id" style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:4px;"></div>
+        <h2 id="modal-task-title"></h2>
+        <div class="modal-meta" id="modal-task-meta"></div>
+      </div>
+      <button id="task-modal-close" onclick="closeTaskModal()">✕</button>
+    </div>
+    <div id="task-modal-body">
+      <div class="task-modal-pane">
+        <h4>Request</h4>
+        <div class="task-text" id="modal-request"></div>
+        <h4 style="margin-top:20px;">Context</h4>
+        <div class="task-text" id="modal-context"></div>
+        <h4 style="margin-top:20px;">Progress Log</h4>
+        <div class="task-text" id="modal-log"></div>
+        <div id="modal-waiting-wrap" style="display:none;margin-top:16px;">
+          <h4 style="color:var(--warn);">Waiting For Input</h4>
+          <div class="task-text" id="modal-waiting"></div>
+        </div>
+      </div>
+      <div class="task-modal-pane">
+        <h4>Output</h4>
+        <div class="task-text" id="modal-output"></div>
+      </div>
+    </div>
+    <div id="task-modal-footer">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;" id="modal-status-btns"></div>
+      <div id="answer-area" style="display:none;flex:1;display:flex;gap:8px;">
+        <textarea id="answer-input" placeholder="Type your answer…"></textarea>
+        <button class="btn btn-primary btn-sm" onclick="submitAnswer()">Send</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Agent modal ── -->
+<div id="agent-modal-backdrop" onclick="closeAgentModal(event)">
+  <div id="agent-modal">
+    <div id="agent-modal-header">
+      <div>
+        <div style="font-size:15px;font-weight:700;" id="agent-modal-title">Agent</div>
+        <div style="margin-top:4px;font-size:11px;" id="agent-scope-badge"></div>
+      </div>
+      <button style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;" onclick="closeAgentModal()">✕</button>
+    </div>
+    <div id="agent-modal-body">
+      <div id="agent-editor"><textarea id="agent-content-area" spellcheck="false"></textarea></div>
+    </div>
+    <div id="agent-modal-footer">
+      <div style="display:flex;align-items:center;gap:8px;flex:1;">
+        <label style="font-size:11px;color:var(--muted);">Save to</label>
+        <select id="agent-scope-select" style="background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:4px 8px;font-size:12px;font-family:var(--sans);">
+          <option value="vault">📁 Vault (active)</option>
+          <option value="global">🌐 Global</option>
+        </select>
+      </div>
+      <button class="btn btn-ghost" onclick="closeAgentModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveAgentContent()">Save Agent</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────
+let currentVault = null;
+let tasksData = [];
+let outboxData = [];
+let agentsData = [];
+let fileTreeData = null;
+let fileTreeLoaded = false;
+let currentFilePath = null;
+let openDirs = new Set();
+let currentFileRaw = false;
+let currentAgentName = null;
+let settingsData = {};
+let schedulesData = [];
+let notesData = [];
+let currentNotePath = null;
+
+const API = (path, vault) => {
+  const v = vault || currentVault;
+  return v ? `${path}?vault=${v}` : path;
+};
+
+// ── Navigation ──────────────────────────────────────────────────
+document.querySelectorAll('.nav-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    tab.classList.add('active');
+    const view = tab.dataset.view;
+    document.getElementById(`view-${view}`).classList.add('active');
+    if (view === 'files' && !fileTreeLoaded) loadFileTree();
+    if (view === 'org') loadOrgChart();
+    if (view === 'settings') loadSettings();
+    if (view === 'schedules') loadSchedules();
+    if (view === 'notes') loadNotes();
+  });
+});
+
+// ── Vault switcher ──────────────────────────────────────────────
+async function loadVaults() {
+  const res = await fetch('/api/vaults');
+  const vaults = await res.json();
+  const sel = document.getElementById('vault-select');
+  sel.innerHTML = vaults.map(v =>
+    `<option value="${v.id}" ${v.active ? 'selected' : ''}>${v.name}</option>`
+  ).join('');
+  const active = vaults.find(v => v.active) || vaults[0];
+  if (active) {
+    currentVault = active.id;
+    document.getElementById('tasks-vault-label').textContent = active.name + ' vault';
+  }
+}
+
+async function switchVault(id) {
+  await fetch('/api/vault-switch', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({id})
+  });
+  currentVault = id;
+  fileTreeLoaded = false;
+  fileTreeData = null;
+  document.getElementById('tasks-vault-label').textContent =
+    document.querySelector(`#vault-select option[value="${id}"]`)?.textContent + ' vault' || '';
+  loadAll();
+}
+
+// ── Data loading ────────────────────────────────────────────────
+async function loadAll() {
+  const [tasksRes, outboxRes, agentsRes] = await Promise.all([
+    fetch(API('/api/tasks')),
+    fetch(API('/api/outbox')),
+    fetch(API('/api/agents')),
+  ]);
+  tasksData  = await tasksRes.json();
+  outboxData = await outboxRes.json();
+  agentsData = await agentsRes.json();
+  renderKanban();
+  renderOutbox();
+  renderAgents();
+  updateOutboxBadge();
+  populateAgentDropdown();
+}
+
+function updateOutboxBadge() {
+  const badge = document.getElementById('outbox-badge');
+  const count = outboxData.length;
+  badge.textContent = count;
+  badge.classList.toggle('hidden', count === 0);
+}
+
+// ── Kanban ──────────────────────────────────────────────────────
+const COLS = [
+  {status:'pending',       label:'Pending',        color:'var(--muted)'},
+  {status:'in-progress',   label:'In Progress',     color:'var(--warn)'},
+  {status:'waiting-input', label:'Waiting',         color:'var(--accent)'},
+  {status:'done',          label:'Done',            color:'var(--done)'},
+];
+
+function renderKanban() {
+  const board = document.getElementById('kanban-board');
+  board.innerHTML = COLS.map(col => {
+    const cards = tasksData.filter(t => t.status === col.status);
+    return `<div class="kanban-col">
+      <div class="col-header" style="color:${col.color}">
+        ${col.label} <span class="col-count">${cards.length}</span>
+      </div>
+      ${cards.map(cardHTML).join('')}
+    </div>`;
+  }).join('');
+}
+
+function cardHTML(t) {
+  const p = t.priority.toLowerCase();
+  const preview = t.output_preview ? `<div class="kanban-card-output">${escHtml(t.output_preview)}</div>` : '';
+  const waiting = t.waiting_question ? `<div class="waiting-q">❓ ${escHtml(t.waiting_question)}</div>` : '';
+  return `<div class="kanban-card" onclick="openTaskModal('${t.id}')">
+    <div class="kanban-card-id">${t.id}</div>
+    <div class="kanban-card-title">${escHtml(t.title)}</div>
+    <div class="kanban-card-meta">
+      <span class="pill ${p}">${t.priority}</span>
+      <span class="pill agent">${t.assigned_to}</span>
+    </div>
+    ${waiting}${preview}
+  </div>`;
+}
+
+// ── Task modal ──────────────────────────────────────────────────
+let currentModalTaskId = null;
+
+async function openTaskModal(taskId) {
+  currentModalTaskId = taskId;
+  const res  = await fetch(API(`/api/task-read&id=${taskId}`.replace('&','?').replace('?vault','&vault')));
+  // Re-build the URL properly
+  const url = currentVault
+    ? `/api/task-read?id=${taskId}&vault=${currentVault}`
+    : `/api/task-read?id=${taskId}`;
+  const data = await (await fetch(url)).json();
+  if (data.error) return;
+
+  document.getElementById('modal-task-id').textContent = data.id;
+  document.getElementById('modal-task-title').textContent = data.title;
+  document.getElementById('modal-task-meta').innerHTML = `
+    <span class="pill ${(data.priority||'Medium').toLowerCase()}">${data.priority||'Medium'}</span>
+    <span class="pill agent">${data.assigned_to||''}</span>
+    <span style="font-size:11px;color:var(--muted)">${data.updated||''}</span>
+  `;
+  const s = data.sections || {};
+  document.getElementById('modal-request').innerHTML  = renderMarkdown(s.request||'—');
+  document.getElementById('modal-context').innerHTML  = renderMarkdown(s.context||'—');
+  document.getElementById('modal-log').innerHTML      = renderMarkdown(s.progress_log||'—');
+  document.getElementById('modal-output').innerHTML   = renderMarkdown(s.output||'*Pending.*');
+
+  const wfi = s.waiting_for_input || '';
+  const wrapEl = document.getElementById('modal-waiting-wrap');
+  if (wfi.trim()) {
+    document.getElementById('modal-waiting').innerHTML = renderMarkdown(wfi);
+    wrapEl.style.display = 'block';
+  } else {
+    wrapEl.style.display = 'none';
+  }
+
+  const ansArea = document.getElementById('answer-area');
+  ansArea.style.display = data.status === 'waiting-input' ? 'flex' : 'none';
+  document.getElementById('answer-input').value = '';
+
+  const statusBtns = document.getElementById('modal-status-btns');
+  const nextStatuses = {
+    pending:         ['in-progress','blocked','done'],
+    'in-progress':   ['done','blocked'],
+    'waiting-input': ['in-progress','done'],
+    blocked:         ['pending','in-progress'],
+    done:            ['pending'],
+  }[data.status] || [];
+  statusBtns.innerHTML = nextStatuses.map(s =>
+    `<button class="btn btn-ghost btn-sm" onclick="setStatus('${data.id}','${s}')">${s}</button>`
+  ).join('');
+
+  document.getElementById('task-modal-backdrop').classList.add('open');
+}
+
+function closeTaskModal(e) {
+  if (e && e.target !== document.getElementById('task-modal-backdrop')) return;
+  document.getElementById('task-modal-backdrop').classList.remove('open');
+  currentModalTaskId = null;
+}
+
+async function setStatus(id, status) {
+  await fetch(API('/api/task-status'), {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({id, status})
+  });
+  document.getElementById('task-modal-backdrop').classList.remove('open');
+  loadAll();
+}
+
+async function submitAnswer() {
+  const answer = document.getElementById('answer-input').value.trim();
+  if (!answer || !currentModalTaskId) return;
+  await fetch(API('/api/task-answer'), {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({id: currentModalTaskId, answer})
+  });
+  document.getElementById('task-modal-backdrop').classList.remove('open');
+  loadAll();
+}
+
+// ── New task form ───────────────────────────────────────────────
+function toggleNewTask() {
+  document.getElementById('new-task-form').classList.toggle('open');
+}
+
+function populateAgentDropdown() {
+  const sel = document.getElementById('nt-agent');
+  sel.innerHTML = agentsData.map(a =>
+    `<option value="${a.name}">${a.emoji} ${a.name}</option>`
+  ).join('');
+}
+
+async function submitNewTask() {
+  const title = document.getElementById('nt-title').value.trim();
+  const request = document.getElementById('nt-request').value.trim();
+  if (!title || !request) { alert('Title and Request are required.'); return; }
+  const body = {
+    title, request,
+    context: document.getElementById('nt-context').value.trim(),
+    priority: document.getElementById('nt-priority').value,
+    assigned_to: document.getElementById('nt-agent').value,
+  };
+  const res = await fetch(API('/api/task-create'), {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(body)
+  });
+  const data = await res.json();
+  if (data.ok) {
+    document.getElementById('nt-title').value = '';
+    document.getElementById('nt-request').value = '';
+    document.getElementById('nt-context').value = '';
+    toggleNewTask();
+    loadAll();
+  }
+}
+
+// ── Outbox ──────────────────────────────────────────────────────
+function renderOutbox() {
+  const el = document.getElementById('outbox-list');
+  if (!outboxData.length) {
+    el.innerHTML = '<div class="outbox-empty">No drafts waiting for review.</div>';
+    return;
+  }
+  el.innerHTML = outboxData.map(e => `
+    <div class="outbox-card" id="out-${e.id}">
+      <div class="outbox-card-header">
+        <div>
+          <div class="outbox-meta">
+            <strong>${e.id}</strong> · ${e.agent||''} · ${e.date||''}
+            ${e.to ? ` → <strong>${escHtml(e.to)}</strong>` : ''}
+          </div>
+          <div class="outbox-subject">${escHtml(e.subject||'(no subject)')}</div>
+        </div>
+        <div class="outbox-card-actions">
+          <button class="btn btn-ghost btn-sm" onclick="copyOutbox('${e.id}')">Copy</button>
+          <button class="btn btn-danger btn-sm" onclick="discardOutbox('${e.id}')">Discard</button>
+        </div>
+      </div>
+      <div class="outbox-body">${escHtml(e.body||'')}</div>
+    </div>
+  `).join('');
+}
+
+async function copyOutbox(id) {
+  const entry = outboxData.find(e => e.id === id);
+  if (!entry) return;
+  const text = `To: ${entry.to||''}\nSubject: ${entry.subject||''}\n\n${entry.body||''}`;
+  await navigator.clipboard.writeText(text).catch(() => {});
+  const btn = document.querySelector(`#out-${id} .btn-ghost`);
+  if (btn) { btn.textContent = 'Copied!'; setTimeout(() => btn.textContent = 'Copy', 1500); }
+}
+
+async function discardOutbox(id) {
+  if (!confirm('Discard this draft?')) return;
+  await fetch(API('/api/outbox-discard'), {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({id})
+  });
+  outboxData = outboxData.filter(e => e.id !== id);
+  renderOutbox();
+  updateOutboxBadge();
+}
+
+// ── Agents ──────────────────────────────────────────────────────
+function renderAgents() {
+  // Group by scope for display
+  const global = agentsData.filter(a => a.scope === 'global');
+  const vault  = agentsData.filter(a => a.scope === 'vault');
+  let html = '';
+  if (global.length) {
+    html += `<div style="font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;grid-column:1/-1;">🌐 Global</div>`;
+    html += global.map(agentCardHTML).join('');
+  }
+  if (vault.length) {
+    const vaultLabel = vault[0].vault || currentVault || 'vault';
+    html += `<div style="font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin:16px 0 10px;grid-column:1/-1;">📁 ${escHtml(vaultLabel)}</div>`;
+    html += vault.map(agentCardHTML).join('');
+  }
+  document.getElementById('agent-grid').innerHTML = html;
+}
+
+function agentCardHTML(a) {
+  const scopeStyle = a.scope === 'vault'
+    ? 'border-color:var(--accent);background:rgba(255,230,0,.04);'
+    : '';
+  return `<div class="agent-card" style="${scopeStyle}" onclick="openAgentModal('${escHtml(a.name)}')">
+    <div class="agent-emoji">${a.emoji||'🤖'}</div>
+    <div class="agent-name">${escHtml(a.name)}</div>
+    <div class="agent-role">${escHtml(a.role||'')}</div>
+    ${a.tagline ? `<div class="agent-tagline">"${escHtml(a.tagline)}"</div>` : ''}
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
+      <div class="agent-status">● ${a.status||'Active'}</div>
+      <span style="font-size:10px;color:var(--muted);">${a.scope === 'vault' ? '📁 '+escHtml(a.vault||'') : '🌐 global'}</span>
+    </div>
+  </div>`;
+}
+
+let currentAgentScope = 'global';
+
+async function openAgentModal(name) {
+  currentAgentName = name;
+  const url = currentVault
+    ? `/api/agent-read?name=${encodeURIComponent(name)}&vault=${currentVault}`
+    : `/api/agent-read?name=${encodeURIComponent(name)}`;
+  const data = await (await fetch(url)).json();
+  currentAgentScope = data.scope || 'global';
+
+  document.getElementById('agent-modal-title').textContent = name;
+  document.getElementById('agent-content-area').value = data.content || '';
+
+  // Scope selector
+  const scopeEl = document.getElementById('agent-scope-select');
+  if (scopeEl) {
+    scopeEl.value = currentAgentScope;
+  }
+  const scopeBadge = document.getElementById('agent-scope-badge');
+  if (scopeBadge) {
+    scopeBadge.textContent = currentAgentScope === 'vault'
+      ? `📁 ${data.vault || currentVault}`
+      : '🌐 global';
+    scopeBadge.style.color = currentAgentScope === 'vault' ? 'var(--accent)' : 'var(--muted)';
+  }
+
+  document.getElementById('agent-modal-backdrop').classList.add('open');
+}
+
+function closeAgentModal(e) {
+  if (e && e.target !== document.getElementById('agent-modal-backdrop')) return;
+  document.getElementById('agent-modal-backdrop').classList.remove('open');
+  currentAgentName = null;
+}
+
+async function saveAgentContent() {
+  const content = document.getElementById('agent-content-area').value;
+  const scope   = document.getElementById('agent-scope-select')?.value || currentAgentScope;
+  await fetch(API('/api/agent-save'), {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name: currentAgentName, content, scope, vault: currentVault})
+  });
+  document.getElementById('agent-modal-backdrop').classList.remove('open');
+  loadAll();
+}
+
+// ── Org chart ───────────────────────────────────────────────────
+async function loadOrgChart() {
+  const res  = await fetch('/api/org-chart');
+  const root = await res.json();
+  document.getElementById('org-chart').innerHTML = renderOrgNode(root, true);
+}
+
+function renderOrgNode(node, isRoot) {
+  const cls = isRoot ? 'org-node root' : 'org-node';
+  const children = (node.children||[]).filter(c => c.name);
+  let childrenHtml = '';
+  if (children.length) {
+    childrenHtml = `<div class="org-level">${children.map(c =>
+      `<div class="org-col"><div class="org-col-line"></div>${renderOrgNode(c,false)}</div>`
+    ).join('')}</div>`;
+  }
+  return `<div style="display:flex;flex-direction:column;align-items:center;">
+    <div class="${cls}">
+      <div class="org-emoji">${node.emoji||'🤖'}</div>
+      <div class="org-name">${node.name||''}</div>
+      <div class="org-role">${node.role||''}</div>
+    </div>
+    ${childrenHtml}
+  </div>`;
+}
+
+// ── File browser ────────────────────────────────────────────────
+const FILE_ICONS = {md:'📄',txt:'📄',py:'🐍',js:'📜',json:'{}',html:'🌐',css:'🎨',sh:'⚙',pdf:'📕',png:'🖼',jpg:'🖼',jpeg:'🖼',svg:'🖼',gif:'🖼'};
+const TEXT_EXTS  = new Set(['md','txt','py','js','json','html','css','sh','yaml','yml','toml','csv']);
+const IMG_EXTS   = new Set(['png','jpg','jpeg','gif','webp','svg']);
+
+async function loadFileTree() {
+  document.getElementById('file-tree').innerHTML = '<div class="tree-item" style="color:var(--muted)">Loading…</div>';
+  const res  = await fetch(API('/api/vault-tree'));
+  fileTreeData = await res.json();
+  fileTreeLoaded = true;
+  renderFileTree();
+}
+
+function renderFileTree() {
+  document.getElementById('file-tree').innerHTML = fileTreeData.map(n => renderTreeNode(n, 0)).join('');
+}
+
+function renderTreeNode(node, depth) {
+  const indent = `style="padding-left:${12 + depth*14}px"`;
+  if (node.type === 'dir') {
+    const open = openDirs.has(node.path);
+    const arrow = open ? '▾' : '▸';
+    const children = open ? (node.children||[]).map(c => renderTreeNode(c, depth+1)).join('') : '';
+    return `<div class="tree-item dir" ${indent} onclick="toggleDir('${node.path}')">
+      <span class="tree-icon">${arrow}</span>📁 ${escHtml(node.name)}
+    </div>${children}`;
+  }
+  const icon = FILE_ICONS[node.ext] || '📄';
+  const sel  = currentFilePath === node.path ? ' selected' : '';
+  return `<div class="tree-item${sel}" ${indent} onclick="openVaultFile('${node.path}')">
+    <span class="tree-icon"></span>${icon} ${escHtml(node.name)}
+  </div>`;
+}
+
+function toggleDir(path) {
+  if (openDirs.has(path)) openDirs.delete(path); else openDirs.add(path);
+  renderFileTree();
+}
+
+async function openVaultFile(path) {
+  currentFilePath = path;
+  currentFileRaw = false;
+  document.getElementById('fv-path').textContent = path;
+  const ext = path.split('.').pop().toLowerCase();
+  const rawBtn  = document.getElementById('fv-raw-btn');
+  const editBtn = document.getElementById('fv-edit-btn');
+  renderFileTree();
+
+  if (IMG_EXTS.has(ext)) {
+    const url = API(`/api/vault-raw&path=${encodeURIComponent(path)}`).replace('&','?').replace('?vault','&vault');
+    const vurl = currentVault
+      ? `/api/vault-raw?path=${encodeURIComponent(path)}&vault=${currentVault}`
+      : `/api/vault-raw?path=${encodeURIComponent(path)}`;
+    document.getElementById('fv-content').innerHTML = `<img src="${vurl}" style="max-width:100%;padding:20px;">`;
+    rawBtn.style.display = 'none';
+    editBtn.style.display = 'none';
+    return;
+  }
+
+  if (!TEXT_EXTS.has(ext)) {
+    document.getElementById('fv-content').innerHTML = `<div class="fv-placeholder">Binary file — cannot preview</div>`;
+    rawBtn.style.display = 'none';
+    editBtn.style.display = 'none';
+    return;
+  }
+
+  const vurl = currentVault
+    ? `/api/vault-raw?path=${encodeURIComponent(path)}&vault=${currentVault}`
+    : `/api/vault-raw?path=${encodeURIComponent(path)}`;
+  const text = await (await fetch(vurl)).text();
+  rawBtn.style.display = ext === 'md' ? 'inline-flex' : 'none';
+  editBtn.style.display = 'inline-flex';
+  displayTextFile(text, ext);
+}
+
+function displayTextFile(text, ext) {
+  const el = document.getElementById('fv-content');
+  if (ext === 'md' && !currentFileRaw) {
+    el.innerHTML = `<div class="fv-md task-text">${renderMarkdown(text)}</div>`;
+  } else {
+    el.innerHTML = `<div class="fv-code">${escHtml(text)}</div>`;
+  }
+}
+
+function toggleFvRaw() {
+  currentFileRaw = !currentFileRaw;
+  document.getElementById('fv-raw-btn').textContent = currentFileRaw ? 'Preview' : 'Raw';
+  openVaultFile(currentFilePath);
+}
+
+function editVaultFile() {
+  const contentEl = document.getElementById('fv-content');
+  const currentText = contentEl.querySelector('.fv-code, .fv-md')?.textContent || '';
+  contentEl.innerHTML = `<div class="fv-editor">
+    <textarea id="fv-edit-area">${escHtml(currentText)}</textarea>
+    <div class="fv-editor-bar">
+      <button class="btn btn-ghost btn-sm" onclick="cancelFvEdit()">Cancel</button>
+      <button class="btn btn-primary btn-sm" onclick="saveVaultFile()">Save</button>
+    </div>
+  </div>`;
+}
+
+function cancelFvEdit() { openVaultFile(currentFilePath); }
+
+async function saveVaultFile() {
+  const content = document.getElementById('fv-edit-area').value;
+  const res = await fetch(API('/api/vault-file-save'), {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({path: currentFilePath, content})
+  });
+  const data = await res.json();
+  if (data.ok) openVaultFile(currentFilePath);
+}
+
+// ── Settings ────────────────────────────────────────────────────
+async function loadSettings() {
+  const [settRes, vaultsRes] = await Promise.all([
+    fetch('/api/settings'),
+    fetch('/api/vaults'),
+  ]);
+  settingsData = await settRes.json();
+  const vaults = await vaultsRes.json();
+  document.getElementById('s-console-name').value = settingsData.console?.name || '';
+  document.getElementById('s-port').value          = settingsData.console?.port || 7842;
+  document.getElementById('s-user-name').value     = settingsData.user?.name || '';
+  document.getElementById('s-user-email').value    = settingsData.user?.email || '';
+  loadSettingsPollInterval(settingsData);
+  renderVaultList(vaults);
+}
+
+const EMAIL_PROVIDERS = ['zoho','m365','gmail','icloud','fastmail','other'];
+const PROVIDER_LABELS  = {zoho:'Zoho Mail', m365:'Microsoft 365', gmail:'Gmail', icloud:'iCloud', fastmail:'Fastmail', other:'Other'};
+
+function renderVaultList(vaults) {
+  document.getElementById('vault-list').innerHTML = vaults.map(v => {
+    const active    = v.active;
+    const emailCfg  = v.integrations?.email  || {};
+    const calCfg    = v.integrations?.calendar || {};
+    const emailSet  = emailCfg.provider;
+    const provOpts  = EMAIL_PROVIDERS.map(p =>
+      `<option value="${p}" ${emailCfg.provider === p ? 'selected' : ''}>${PROVIDER_LABELS[p]||p}</option>`
+    ).join('');
+
+    return `
+    <div class="vault-card ${active ? 'active-vault' : ''}" id="vault-card-${v.id}">
+      <div class="vault-card-header">
+        <div>
+          <div class="vault-row-name">${escHtml(v.name)}</div>
+          <div class="vault-row-id">${v.id}</div>
+        </div>
+        <div class="vault-row-actions">
+          ${emailSet ? `<span class="integration-pill configured">✉️ ${PROVIDER_LABELS[emailSet]||emailSet}</span>` : `<span class="integration-pill">✉️ No email</span>`}
+          ${!active ? `<button class="btn btn-ghost btn-sm" onclick="switchVault('${v.id}')">Switch</button>` : '<span style="font-size:11px;color:var(--done);font-weight:600;">● Active</span>'}
+          <button class="btn btn-ghost btn-sm" onclick="toggleVaultIntegrations('${v.id}')">Configure</button>
+        </div>
+      </div>
+      <div class="vault-integrations" id="vault-int-${v.id}">
+        <h4>Integrations</h4>
+        <div class="integration-row">
+          <span class="integration-label">Email</span>
+          <select class="provider-select" id="vi-email-provider-${v.id}">
+            <option value="">— none —</option>
+            ${provOpts}
+          </select>
+          <input class="integration-address" type="email" id="vi-email-address-${v.id}"
+            placeholder="your@email.com" value="${escHtml(emailCfg.address||'')}">
+        </div>
+        <div class="integration-row">
+          <span class="integration-label">Calendar</span>
+          <span class="integration-pill coming-soon">📅 Coming soon</span>
+        </div>
+        <div class="integration-row">
+          <span class="integration-label">Tasks</span>
+          <span class="integration-pill coming-soon">✅ Coming soon</span>
+        </div>
+        <div class="integration-row">
+          <span class="integration-label">Chat</span>
+          <span class="integration-pill coming-soon">💬 Coming soon</span>
+        </div>
+        <div style="margin-top:12px;">
+          <button class="btn btn-primary btn-sm" onclick="saveVaultIntegrations('${v.id}')">Save</button>
+          <span id="vi-saved-${v.id}" style="display:none;margin-left:10px;font-size:11px;color:var(--done);">Saved ✓</span>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function toggleVaultIntegrations(id) {
+  document.getElementById(`vault-int-${id}`).classList.toggle('open');
+}
+
+async function saveVaultIntegrations(id) {
+  const provider = document.getElementById(`vi-email-provider-${id}`).value || null;
+  const address  = document.getElementById(`vi-email-address-${id}`).value.trim() || null;
+  const res = await fetch(`/api/vault-config-save?vault=${id}`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      id,
+      integrations: {
+        email:    {provider, address},
+        calendar: {provider: null, address: null},
+      },
+      apps: [],
+    }),
+  });
+  const data = await res.json();
+  if (data.ok) {
+    const saved = document.getElementById(`vi-saved-${id}`);
+    saved.style.display = 'inline';
+    setTimeout(() => { saved.style.display = 'none'; }, 2500);
+    await loadSettings(); // refresh vault pills
+  }
+}
+
+async function addVault() {
+  const id   = document.getElementById('new-vault-id').value.trim().replace(/\s+/g,'-').toLowerCase();
+  const name = document.getElementById('new-vault-name').value.trim();
+  if (!id || !name) { alert('Vault ID and name required.'); return; }
+  const res = await fetch('/api/vault-add', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({id, name})
+  });
+  const data = await res.json();
+  if (data.ok) {
+    document.getElementById('new-vault-id').value = '';
+    document.getElementById('new-vault-name').value = '';
+    await loadSettings();
+    await loadVaults();
+  }
+}
+
+async function saveSettings() {
+  const updated = {
+    ...settingsData,
+    console: {
+      name: document.getElementById('s-console-name').value.trim(),
+      port: parseInt(document.getElementById('s-port').value) || 7842,
+    },
+    user: {
+      name:  document.getElementById('s-user-name').value.trim(),
+      email: document.getElementById('s-user-email').value.trim(),
+    },
+    dispatch: {
+      poll_interval: parseInt(document.getElementById('s-poll-interval').value) || 0,
+      auto_dispatch: document.getElementById('s-auto-dispatch')?.checked ?? false,
+    },
+  };
+  await fetch('/api/settings-save', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(updated)
+  });
+  settingsData = updated;
+  const saved = document.getElementById('settings-saved');
+  saved.style.display = 'inline';
+  setTimeout(() => saved.style.display = 'none', 2500);
+}
+
+// ── Markdown renderer ───────────────────────────────────────────
+function renderMarkdown(text) {
+  if (!text) return '';
+  text = text.replace(/^---\n[\s\S]*?\n---\n?/, '');
+  let html = escHtml(text);
+  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^## (.+)$/gm,  '<h2>$1</h2>');
+  html = html.replace(/^# (.+)$/gm,   '<h1>$1</h1>');
+  html = html.replace(/^\|(.+)\|$/gm, row => {
+    if (/^[\s\|:\-]+$/.test(row)) return '';
+    const cells = row.slice(1,-1).split('|').map(c => `<td>${c.trim()}</td>`).join('');
+    return `<tr>${cells}</tr>`;
+  });
+  html = html.replace(/(<tr>.*<\/tr>)/gs, '<table>$1</table>');
+  html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/\*(.+?)\*/g,     '<em>$1</em>');
+  html = html.replace(/`(.+?)`/g,       '<code>$1</code>');
+  html = html.replace(/\[\[(.+?)\]\]/g, '<span style="color:var(--accent)">$1</span>');
+  html = html.replace(/^[-*] (.+)$/gm,  '<li>$1</li>');
+  html = html.replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>');
+  html = html.replace(/\n{2,}/g, '</p><p>');
+  return `<p>${html}</p>`.replace(/<p><\/p>/g,'').replace(/<p>(<[hH])/g,'$1').replace(/(<\/[hH]\d>)<\/p>/g,'$1');
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Terminal ────────────────────────────────────────────────────
+let termHistory    = [];
+let termHistoryIdx = -1;
+let termMode       = 'agent';
+let termBusy       = false;
+
+function termPrint(html) {
+  const out = document.getElementById('terminal-output');
+  const div = document.createElement('div');
+  div.className = 'term-line';
+  div.innerHTML = html;
+  out.appendChild(div);
+  out.scrollTop = out.scrollHeight;
+}
+
+function setTermMode(mode) {
+  termMode = mode;
+  const ps1   = document.getElementById('term-ps1-label');
+  const input = document.getElementById('term-input');
+  const agBtn = document.getElementById('mode-agent-btn');
+  const shBtn = document.getElementById('mode-shell-btn');
+  if (mode === 'agent') {
+    if (ps1)   ps1.textContent = 'agent ›';
+    if (input) input.placeholder = 'ask anything, /dispatch, or !shell-cmd';
+    if (agBtn) { agBtn.style.borderColor = 'var(--accent)'; agBtn.style.color = 'var(--accent)'; }
+    if (shBtn) { shBtn.style.borderColor = ''; shBtn.style.color = ''; }
+  } else {
+    if (ps1)   ps1.textContent = 'shell $';
+    if (input) input.placeholder = 'shell command  (use Agent mode for /dispatch)';
+    if (agBtn) { agBtn.style.borderColor = ''; agBtn.style.color = ''; }
+    if (shBtn) { shBtn.style.borderColor = 'var(--accent)'; shBtn.style.color = 'var(--accent)'; }
+  }
+}
+
+async function termRun(cmd) {
+  if (!cmd.trim() || termBusy) return;
+
+  const isShellForced = cmd.startsWith('!');
+  const isShell       = termMode === 'shell' || isShellForced;
+  const actualCmd     = isShellForced ? cmd.slice(1).trim() : cmd;
+
+  const ps1Html = isShell
+    ? `<span class="term-ps1" style="color:var(--muted)">shell $</span>`
+    : `<span class="term-ps1">agent ›</span>`;
+  termPrint(`<div class="term-prompt-line">${ps1Html}<span class="term-cmd">${escHtml(actualCmd)}</span></div>`);
+
+  if (termHistory[0] !== cmd) termHistory.unshift(cmd);
+  if (termHistory.length > 50) termHistory.pop();
+  termHistoryIdx = -1;
+  renderTermHistory();
+
+  termBusy = true;
+  const inp = document.getElementById('term-input');
+  if (inp) inp.disabled = true;
+
+  try {
+    if (isShell) {
+      await termRunShell(actualCmd);
+    } else {
+      await termRunAgent(actualCmd);
+    }
+  } finally {
+    termBusy = false;
+    if (inp) { inp.disabled = false; inp.focus(); }
+  }
+}
+
+async function termRunShell(cmd) {
+  try {
+    const res  = await fetch('/api/terminal', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({cmd}),
+    });
+    const data = await res.json();
+    if (data.stdout) termPrint(`<span class="term-out">${escHtml(data.stdout.replace(/\n$/, ''))}</span>`);
+    if (data.stderr) termPrint(`<span class="term-err">${escHtml(data.stderr.replace(/\n$/, ''))}</span>`);
+    if (data.exit_code !== 0 && !data.stderr) termPrint(`<span class="term-exit">[exit ${data.exit_code}]</span>`);
+  } catch (e) {
+    termPrint(`<span class="term-err">Shell error: ${escHtml(e.message)}</span>`);
+  }
+}
+
+async function termRunAgent(prompt) {
+  const out     = document.getElementById('terminal-output');
+  const spinner = document.createElement('div');
+  spinner.className = 'term-line';
+  spinner.innerHTML = `<span class="term-out" style="opacity:.4;font-style:italic;">thinking…</span>`;
+  out.appendChild(spinner);
+  out.scrollTop = 99999;
+
+  try {
+    const res  = await fetch('/api/claude', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({prompt}),
+    });
+    const data = await res.json();
+    spinner.remove();
+    if (data.output) termPrint(`<span class="term-out">${escHtml(data.output.replace(/\n$/, ''))}</span>`);
+    if (data.stderr) termPrint(`<span class="term-err">${escHtml(data.stderr.replace(/\n$/, ''))}</span>`);
+    if (!data.ok && !data.output) termPrint(`<span class="term-err">Agent error (exit ${data.exit_code})</span>`);
+    loadAll(); loadStatus();
+  } catch (e) {
+    spinner.remove();
+    termPrint(`<span class="term-err">Request failed: ${escHtml(e.message)}</span>`);
+  }
+}
+
+function renderTermHistory() {
+  const el = document.getElementById('term-history-list');
+  if (!el) return;
+  el.innerHTML = termHistory.slice(0, 8).map(c =>
+    `<div style="cursor:pointer;padding:3px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;" onclick="termRun('${escHtml(c)}')" title="${escHtml(c)}">${escHtml(c)}</div>`
+  ).join('');
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const input = document.getElementById('term-input');
+  if (!input) return;
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      const cmd = input.value.trim();
+      if (!cmd) return;
+      input.value = '';
+      termRun(cmd);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (termHistoryIdx < termHistory.length - 1) {
+        termHistoryIdx++;
+        input.value = termHistory[termHistoryIdx];
+      }
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (termHistoryIdx > 0) { termHistoryIdx--; input.value = termHistory[termHistoryIdx]; }
+      else { termHistoryIdx = -1; input.value = ''; }
+    }
+  });
+});
+
+// Focus terminal input when switching to terminal tab
+document.querySelectorAll('.nav-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    if (tab.dataset.view === 'terminal') {
+      setTimeout(() => document.getElementById('term-input')?.focus(), 50);
+    }
+  });
+});
+
+// ── Status & watcher ────────────────────────────────────────────
+let dispatchAlertDismissed = false;
+
+async function loadStatus() {
+  try {
+    const res  = await fetch('/api/status');
+    const data = await res.json();
+    updatePendingBadge(data.pending || 0);
+    updateDispatchAlert(data);
+  } catch (_) {}
+}
+
+function updatePendingBadge(count) {
+  const badge = document.getElementById('pending-badge');
+  if (!badge) return;
+  badge.textContent = count;
+  badge.className = 'badge' + (count === 0 ? ' hidden' : ' warn');
+}
+
+function updateDispatchAlert(data) {
+  const alert = document.getElementById('dispatch-alert');
+  if (!alert) return;
+  const pending = data.pending || 0;
+  const inProg  = data.in_progress || 0;
+  const total   = pending + inProg;
+  if (total > 0 && !dispatchAlertDismissed) {
+    const parts = [];
+    if (pending > 0)  parts.push(`${pending} pending`);
+    if (inProg  > 0)  parts.push(`${inProg} in progress`);
+    document.getElementById('dispatch-alert-msg').textContent =
+      parts.join(', ') + ' — run /dispatch in Claude Code to process.';
+    alert.style.display = 'flex';
+  } else {
+    alert.style.display = 'none';
+  }
+}
+
+function dismissDispatchAlert() {
+  dispatchAlertDismissed = true;
+  document.getElementById('dispatch-alert').style.display = 'none';
+}
+
+async function triggerDispatch() {
+  dispatchAlertDismissed = true;
+  document.getElementById('dispatch-alert').style.display = 'none';
+  // Switch to terminal, run dispatch there so user can see output
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.querySelector('[data-view="terminal"]').classList.add('active');
+  document.getElementById('view-terminal').classList.add('active');
+  setTermMode('agent');
+  await termRun('/dispatch');
+}
+
+function runDispatchInTerminal() {
+  // Switch to terminal tab and pre-fill a helpful message
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  const termTab = document.querySelector('[data-view="terminal"]');
+  if (termTab) termTab.classList.add('active');
+  document.getElementById('view-terminal').classList.add('active');
+  const input = document.getElementById('term-input');
+  if (input) {
+    input.value = 'python console.py status';
+    input.focus();
+    termPrint(`<div class="term-prompt-line"><span class="term-ps1" style="color:var(--warn)">console</span><span class="term-ps1"> $</span><span class="term-cmd"> # Run /dispatch in Claude Code to process pending tasks</span></div>`);
+  }
+}
+
+// ── Settings — poll interval ─────────────────────────────────────
+function loadSettingsPollInterval(settings) {
+  const sel = document.getElementById('s-poll-interval');
+  if (sel) {
+    const interval = String(settings.dispatch?.poll_interval ?? 60);
+    const opts = Array.from(sel.options).map(o => o.value);
+    sel.value = opts.includes(interval) ? interval : '60';
+  }
+  const cb = document.getElementById('s-auto-dispatch');
+  if (cb) cb.checked = settings.dispatch?.auto_dispatch ?? false;
+}
+
+// ── Schedules ───────────────────────────────────────────────
+async function loadSchedules() {
+  const res = await fetch('/api/schedules');
+  const data = await res.json();
+  schedulesData = data.schedules || [];
+  renderSchedules();
+  // Populate vault dropdown in form
+  const vaultSel = document.getElementById('sf-vault');
+  if (vaultSel) {
+    const vRes = await fetch('/api/vaults');
+    const vaults = await vRes.json();
+    vaultSel.innerHTML = vaults.map(v => `<option value="${v.id}">${v.name} (${v.id})</option>`).join('');
+    const active = vaults.find(v => v.active);
+    if (active) vaultSel.value = active.id;
+  }
+}
+
+function renderSchedules() {
+  const el = document.getElementById('sched-list');
+  if (!el) return;
+  if (!schedulesData.length) {
+    el.innerHTML = `<div style="color:var(--muted);text-align:center;padding:60px 0;font-size:13px;">No schedules yet — create one to automate recurring tasks.</div>`;
+    return;
+  }
+  el.innerHTML = schedulesData.map(s => {
+    const freq = s.schedule || 'daily';
+    const time = s.time || '08:00';
+    const vault = s.vault || 'personal';
+    const enabled = s.enabled !== false;
+    const lastRun = s.last_run ? `Last run: ${s.last_run}` : 'Never run';
+    return `<div class="sched-card ${enabled ? '' : 'disabled'}">
+      <label class="toggle-switch">
+        <input type="checkbox" ${enabled ? 'checked' : ''} onchange="toggleSchedule('${s.id}')">
+        <span class="toggle-slider"></span>
+      </label>
+      <div class="sched-info">
+        <div class="sched-name">${escHtml(s.name)}</div>
+        <div class="sched-detail">${freq} at ${time} · vault: ${escHtml(vault)} · ${lastRun}</div>
+        <div class="sched-prompt">${escHtml(s.prompt || '')}</div>
+      </div>
+      <div class="sched-actions">
+        <button class="btn btn-ghost btn-sm" onclick="runScheduleNow('${s.id}')" title="Run now">&#9654; Run now</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteSchedule('${s.id}')">Delete</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function toggleSchedForm() {
+  document.getElementById('sched-form-wrap').classList.toggle('open');
+}
+
+async function saveSchedule() {
+  const name   = document.getElementById('sf-name').value.trim();
+  const prompt = document.getElementById('sf-prompt').value.trim();
+  if (!name || !prompt) { alert('Name and Prompt are required.'); return; }
+  const sched = {
+    name,
+    prompt,
+    schedule: document.getElementById('sf-freq').value,
+    time:     document.getElementById('sf-time').value || '08:00',
+    vault:    document.getElementById('sf-vault').value || 'personal',
+    enabled:  true,
+    last_run: null,
+  };
+  const res = await fetch('/api/schedule-save', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(sched)
+  });
+  const data = await res.json();
+  if (data.ok) {
+    document.getElementById('sf-name').value = '';
+    document.getElementById('sf-prompt').value = '';
+    toggleSchedForm();
+    loadSchedules();
+  }
+}
+
+async function toggleSchedule(id) {
+  await fetch('/api/schedule-toggle', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({id})
+  });
+  loadSchedules();
+}
+
+async function deleteSchedule(id) {
+  if (!confirm('Delete this schedule?')) return;
+  await fetch('/api/schedule-delete', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({id})
+  });
+  loadSchedules();
+}
+
+async function runScheduleNow(id) {
+  const btn = event.target;
+  btn.disabled = true; btn.textContent = 'Running…';
+  await fetch('/api/schedule-run', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({id})
+  });
+  btn.textContent = 'Queued ✓';
+  setTimeout(() => { btn.disabled = false; btn.textContent = '▶ Run now'; loadSchedules(); }, 2000);
+}
+
+// ── Notes ────────────────────────────────────────────────────
+async function loadNotes() {
+  const res = await fetch(API('/api/notes'));
+  notesData = await res.json();
+  renderNotesSidebar(notesData);
+}
+
+function renderNotesSidebar(notes) {
+  const el = document.getElementById('notes-tree');
+  if (!el) return;
+  if (!notes.length) {
+    el.innerHTML = `<div style="padding:20px 16px;color:var(--muted);font-size:12px;">No notes filed yet.<br><br>Notes are created automatically when tasks complete.</div>`;
+    return;
+  }
+  const cats = {};
+  for (const n of notes) {
+    (cats[n.category] = cats[n.category] || []).push(n);
+  }
+  const ORDER = ['Daily Briefs', 'Research', 'Reference', 'Decisions', 'Inbox'];
+  let html = '';
+  for (const cat of ORDER) {
+    if (!cats[cat]) continue;
+    html += `<div class="ns-cat">${cat} <span style="opacity:.5;">(${cats[cat].length})</span></div>`;
+    html += cats[cat].map(n => {
+      const sel = currentNotePath === n.path ? ' selected' : '';
+      return `<div class="note-item${sel}" onclick="openNote('${escHtml(n.path)}')">
+        <div class="note-item-title">${escHtml(n.title)}</div>
+        <div class="note-item-meta">${n.date || ''}${n.source ? ' · ' + escHtml(n.source) : ''}</div>
+      </div>`;
+    }).join('');
+  }
+  el.innerHTML = html;
+}
+
+function filterNotes(query) {
+  if (!query.trim()) { renderNotesSidebar(notesData); return; }
+  const q = query.toLowerCase();
+  renderNotesSidebar(notesData.filter(n =>
+    n.title.toLowerCase().includes(q) ||
+    (n.tags || '').toLowerCase().includes(q) ||
+    n.category.toLowerCase().includes(q)
+  ));
+}
+
+async function openNote(path) {
+  currentNotePath = path;
+  renderNotesSidebar(notesData);
+  document.getElementById('nv-path').textContent = path;
+  document.getElementById('nv-content').innerHTML = `<div class="nv-empty" style="opacity:.5;">Loading…</div>`;
+  const url = currentVault
+    ? `/api/note-read?path=${encodeURIComponent(path)}&vault=${currentVault}`
+    : `/api/note-read?path=${encodeURIComponent(path)}`;
+  const res = await fetch(url);
+  const data = await res.json();
+  if (data.error) {
+    document.getElementById('nv-content').innerHTML = `<div class="nv-empty" style="color:var(--danger);">Note not found.</div>`;
+    return;
+  }
+  document.getElementById('nv-content').innerHTML = `<div class="nv-md task-text">${renderMarkdown(data.content)}</div>`;
+}
+
+// ── Boot ────────────────────────────────────────────────────────
+(async () => {
+  await loadVaults();
+  await loadAll();
+  await loadStatus();
+  // Refresh data every 30s, status every poll_interval (min 15s)
+  setInterval(loadAll, 30000);
+  setInterval(loadStatus, 15000);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+# ── Vault content (personal data, not synced) ─────────────────
+vaults/*/tasks/
+vaults/*/inbox/
+vaults/*/outbox/
+vaults/*/sessions/
+vaults/*/notes/
+vaults/*/vault.json
+
+# ── Local config (copy settings.example.json on new machines) ──
+settings.json
+
+# ── Python ─────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.tmp
+
+# ── OS / tooling ───────────────────────────────────────────────
+.env
+.DS_Store
+*.log

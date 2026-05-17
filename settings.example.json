@@ -1,0 +1,27 @@
+{
+  "user": {
+    "name": "Your Name",
+    "email": "you@example.com"
+  },
+  "console": {
+    "name": "My Console",
+    "port": 7843
+  },
+  "active_vault": "personal",
+  "vaults": [
+    {
+      "id": "personal",
+      "name": "Personal",
+      "description": "Personal tasks and projects"
+    },
+    {
+      "id": "work",
+      "name": "Work",
+      "description": "Work tasks and projects"
+    }
+  ],
+  "dispatch": {
+    "poll_interval": 60,
+    "auto_dispatch": false
+  }
+}
