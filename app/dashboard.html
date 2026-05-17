@@ -2218,6 +2218,8 @@ async function loadChatSession(filename) {
     if (data.error) return;
     document.querySelectorAll('.chat-session-item').forEach(el =>
       el.classList.toggle('active', el.dataset.file === filename));
+    // Keep the loaded filename so manual Save overwrites the same file
+    _currentSessionFilename = filename;
     chatHistory = parseSessionContent(data.content);
     renderChatMessages();
   } catch (_) {}
@@ -2319,19 +2321,29 @@ async function sendChatMessage() {
   renderChatMessages();
 }
 
-function newChat() {
+async function newChat() {
+  // Auto-save current session before clearing
+  if (chatHistory.length) await saveChatSession(true);
   chatHistory = [];
+  _currentSessionFilename = null;
   document.querySelectorAll('.chat-session-item').forEach(el => el.classList.remove('active'));
   renderChatMessages();
   document.getElementById('chat-input')?.focus();
 }
 
-async function saveChatSession() {
+// Track the filename for the current session so auto-save overwrites it
+let _currentSessionFilename = null;
+
+async function saveChatSession(silent = false) {
   if (!chatHistory.length) return;
   const date = new Date();
   const dateStr = date.toISOString().slice(0, 10);
   const timeStr = date.toTimeString().slice(0, 5).replace(':', '-');
-  const filename = `${dateStr} ${timeStr} - Chat`;
+  // Re-use the same filename for this session so repeated saves don't create duplicates
+  if (!_currentSessionFilename) {
+    _currentSessionFilename = `${dateStr} ${timeStr} - Chat`;
+  }
+  const filename = _currentSessionFilename;
   const path = `sessions/${filename}.md`;
   const lines = [`---\ndate: ${dateStr}\ntype: chat\ntags: [chat]\n---\n\n# Chat ${dateStr} ${timeStr}\n`];
   chatHistory.forEach(t => {
@@ -2344,12 +2356,15 @@ async function saveChatSession() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path, content, vault: currentVault }),
   });
-  // Brief visual feedback + refresh sidebar
-  const btn = event.target;
-  const orig = btn.textContent;
-  btn.textContent = 'Saved ✓';
-  setTimeout(() => { btn.textContent = orig; }, 2000);
   loadChatSessions();
+  if (!silent) {
+    const btn = event?.target;
+    if (btn) {
+      const orig = btn.textContent;
+      btn.textContent = 'Saved ✓';
+      setTimeout(() => { btn.textContent = orig; }, 2000);
+    }
+  }
 }
 
 // Auto-resize textarea + Enter to send (Shift+Enter for newline)

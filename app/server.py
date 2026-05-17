@@ -743,6 +743,7 @@ def _tree_children(path, rel):
     return children
 
 def safe_vault_file_path(rel_path, vault_id=None):
+    """Validate path for reading — file must exist."""
     root = get_vault_path(vault_id).resolve()
     resolved = (root / rel_path).resolve()
     if not str(resolved).startswith(str(root)):
@@ -751,11 +752,20 @@ def safe_vault_file_path(rel_path, vault_id=None):
         raise FileNotFoundError("File not found")
     return resolved
 
+def safe_vault_write_path(rel_path, vault_id=None):
+    """Validate path for writing — file need not exist yet."""
+    root = get_vault_path(vault_id).resolve()
+    resolved = (root / rel_path).resolve()
+    if not str(resolved).startswith(str(root)):
+        raise ValueError("Path outside vault")
+    return resolved
+
 def save_vault_file(rel_path, content, vault_id=None):
-    p = safe_vault_file_path(rel_path, vault_id)
+    p = safe_vault_write_path(rel_path, vault_id)
     editable = {".md", ".txt", ".json", ".yaml", ".yml", ".py", ".sh", ".css", ".js"}
     if p.suffix.lower() not in editable:
         raise ValueError("File type not editable")
+    p.parent.mkdir(parents=True, exist_ok=True)
     _atomic_write(p, content)
     return True
 
