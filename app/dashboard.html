@@ -250,6 +250,51 @@ body::before {
   display: flex; gap: 10px; justify-content: flex-end; flex-shrink: 0;
 }
 
+/* ── Help modal ───────────────────────────────────────────── */
+#help-modal-backdrop {
+  display: none; position: fixed; inset: 0; z-index: 200;
+  background: rgba(0,0,0,.75); align-items: center; justify-content: center;
+}
+#help-modal-backdrop.open { display: flex; }
+#help-modal {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  width: 860px; max-width: 96vw; height: 88vh; display: flex; flex-direction: column;
+  box-shadow: 0 24px 80px rgba(0,0,0,.6);
+}
+#help-modal-header {
+  padding: 14px 20px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 12px; flex-shrink: 0;
+}
+#help-modal-header h2 { font-size: 14px; font-weight: 600; flex: 1; }
+#help-modal-close { background: none; border: none; color: var(--muted); font-size: 20px; cursor: pointer; line-height: 1; padding: 0 4px; }
+#help-modal-close:hover { color: var(--text); }
+#help-tabs { display: flex; gap: 2px; padding: 10px 20px 0; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.help-tab { padding: 6px 14px; font-size: 12px; font-weight: 500; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.help-tab:hover { color: var(--text); }
+.help-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+#help-content {
+  flex: 1; overflow-y: auto; padding: 28px 36px; min-height: 0;
+  font-size: 13px; line-height: 1.75;
+}
+#help-content h1 { font-size: 20px; font-weight: 700; margin: 0 0 18px; }
+#help-content h2 { font-size: 15px; font-weight: 600; margin: 28px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+#help-content h3 { font-size: 13px; font-weight: 600; margin: 20px 0 8px; }
+#help-content h4 { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin: 16px 0 6px; }
+#help-content p { margin: 0 0 12px; }
+#help-content ul, #help-content ol { margin: 0 0 12px; padding-left: 20px; }
+#help-content li { margin-bottom: 4px; }
+#help-content code { font-family: var(--mono); font-size: 11.5px; background: var(--bg); border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; }
+#help-content pre { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 14px 16px; overflow-x: auto; margin: 0 0 14px; }
+#help-content pre code { background: none; border: none; padding: 0; font-size: 12px; line-height: 1.55; }
+#help-content table { border-collapse: collapse; width: 100%; margin: 0 0 14px; font-size: 12px; }
+#help-content th, #help-content td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+#help-content th { background: var(--bg); font-weight: 600; }
+#help-content blockquote { border-left: 3px solid var(--accent); margin: 0 0 12px; padding: 2px 14px; color: var(--muted); font-style: italic; }
+#help-content hr { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
+#help-content a { color: var(--accent); }
+#help-btn { background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 4px; padding: 3px 9px; font-size: 12px; cursor: pointer; margin-left: 8px; }
+#help-btn:hover { color: var(--text); border-color: var(--text); }
+
 /* ── Org chart ────────────────────────────────────────────── */
 .org-wrap { padding: 40px; overflow: auto; width: 100%; }
 .org-node {
@@ -651,6 +696,7 @@ body::before {
       </select>
       <span class="dot" title="Online"></span>
     </div>
+    <button id="help-btn" onclick="openHelp()" title="Documentation">?</button>
   </div>
 
   <!-- Main content -->
@@ -1012,6 +1058,23 @@ body::before {
 
   </div><!-- #content -->
 </div><!-- #app -->
+
+<!-- ── Help modal ── -->
+<div id="help-modal-backdrop" onclick="closeHelp(event)">
+  <div id="help-modal">
+    <div id="help-modal-header">
+      <h2>Documentation</h2>
+      <button id="help-modal-close" onclick="closeHelp()">✕</button>
+    </div>
+    <div id="help-tabs">
+      <div class="help-tab active" data-doc="readme" onclick="loadHelpTab(this)">Overview</div>
+      <div class="help-tab" data-doc="architecture" onclick="loadHelpTab(this)">Architecture</div>
+      <div class="help-tab" data-doc="api-reference" onclick="loadHelpTab(this)">API Reference</div>
+      <div class="help-tab" data-doc="agent-authoring" onclick="loadHelpTab(this)">Agent Authoring</div>
+    </div>
+    <div id="help-content"><p style="color:var(--muted)">Loading…</p></div>
+  </div>
+</div>
 
 <!-- ── Task modal ── -->
 <div id="task-modal-backdrop" onclick="closeTaskModal(event)">
@@ -1810,12 +1873,22 @@ async function saveSettings() {
 function renderMarkdown(text) {
   if (!text) return '';
   text = text.replace(/^---\n[\s\S]*?\n---\n?/, '');
+  // Extract fenced code blocks before escaping so content isn't double-escaped
+  const codeBlocks = [];
+  text = text.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
+    const idx = codeBlocks.length;
+    codeBlocks.push(`<pre><code>${escHtml(code.replace(/\n$/, ''))}</code></pre>`);
+    return `\x00CODE${idx}\x00`;
+  });
   let html = escHtml(text);
-  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
-  html = html.replace(/^## (.+)$/gm,  '<h2>$1</h2>');
-  html = html.replace(/^# (.+)$/gm,   '<h1>$1</h1>');
+  html = html.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
+  html = html.replace(/^### (.+)$/gm,  '<h3>$1</h3>');
+  html = html.replace(/^## (.+)$/gm,   '<h2>$1</h2>');
+  html = html.replace(/^# (.+)$/gm,    '<h1>$1</h1>');
+  html = html.replace(/^---$/gm, '<hr>');
   html = html.replace(/^\|(.+)\|$/gm, row => {
     if (/^[\s\|:\-]+$/.test(row)) return '';
+    const isHeader = false;
     const cells = row.slice(1,-1).split('|').map(c => `<td>${c.trim()}</td>`).join('');
     return `<tr>${cells}</tr>`;
   });
@@ -1824,16 +1897,61 @@ function renderMarkdown(text) {
   html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
   html = html.replace(/\*(.+?)\*/g,     '<em>$1</em>');
   html = html.replace(/`(.+?)`/g,       '<code>$1</code>');
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
   html = html.replace(/\[\[(.+?)\]\]/g, '<span style="color:var(--accent)">$1</span>');
+  html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
   html = html.replace(/^[-*] (.+)$/gm,  '<li>$1</li>');
   html = html.replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>');
   html = html.replace(/\n{2,}/g, '</p><p>');
-  return `<p>${html}</p>`.replace(/<p><\/p>/g,'').replace(/<p>(<[hH])/g,'$1').replace(/(<\/[hH]\d>)<\/p>/g,'$1');
+  html = `<p>${html}</p>`.replace(/<p><\/p>/g,'').replace(/<p>(<[hH1-4]|<hr|<table|<ul|<blockquote)/g,'$1').replace(/(<\/(?:[hH]\d|hr|table|ul|blockquote)>)<\/p>/g,'$1');
+  // Restore code blocks
+  html = html.replace(/\x00CODE(\d+)\x00/g, (_, i) => codeBlocks[+i]);
+  return html;
 }
 
 function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
+
+// ── Help modal ──────────────────────────────────────────────────
+const _helpCache = {};
+
+function openHelp() {
+  document.getElementById('help-modal-backdrop').classList.add('open');
+  const activeTab = document.querySelector('.help-tab.active');
+  if (activeTab) loadHelpTab(activeTab);
+}
+
+function closeHelp(e) {
+  if (e && e.target !== document.getElementById('help-modal-backdrop')) return;
+  document.getElementById('help-modal-backdrop').classList.remove('open');
+}
+
+async function loadHelpTab(el) {
+  document.querySelectorAll('.help-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  const doc = el.dataset.doc;
+  const content = document.getElementById('help-content');
+  if (_helpCache[doc]) { content.innerHTML = _helpCache[doc]; content.scrollTop = 0; return; }
+  content.innerHTML = '<p style="color:var(--muted)">Loading…</p>';
+  try {
+    const r = await fetch(`/api/docs?file=${doc}`);
+    const data = await r.json();
+    if (data.content) {
+      _helpCache[doc] = renderMarkdown(data.content);
+      content.innerHTML = _helpCache[doc];
+      content.scrollTop = 0;
+    } else {
+      content.innerHTML = '<p style="color:var(--error)">Could not load document.</p>';
+    }
+  } catch(e) {
+    content.innerHTML = '<p style="color:var(--error)">Network error.</p>';
+  }
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') document.getElementById('help-modal-backdrop').classList.remove('open');
+});
 
 // ── Terminal ────────────────────────────────────────────────────
 let termHistory    = [];

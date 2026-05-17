@@ -1073,6 +1073,21 @@ class Handler(BaseHTTPRequestHandler):
             "/api/agent-stats":  lambda: get_agent_stats(vid),
         }
 
+        if path == "/api/docs":
+            _allowed_docs = {
+                "readme":          ROOT / "README.md",
+                "architecture":    ROOT / "docs" / "technical" / "architecture.md",
+                "api-reference":   ROOT / "docs" / "technical" / "api-reference.md",
+                "agent-authoring": ROOT / "docs" / "technical" / "agent-authoring.md",
+            }
+            key = qs.get("file", [""])[0].lower()
+            doc_path = _allowed_docs.get(key)
+            if doc_path and doc_path.exists():
+                self.send_json({"content": doc_path.read_text(encoding="utf-8")})
+            else:
+                self.send_json({"error": "not found"}, 404)
+            return
+
         if path == "/api/log":
             since = int(qs.get("since", [0])[0])
             self.send_json({"entries": get_log_entries(since)})
